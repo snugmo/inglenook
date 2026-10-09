@@ -55,6 +55,7 @@ docs/            # On-demand reference docs — read when relevant (see below)
 - Uses `buildah` (not `docker`) — rootless, works in CI without a Docker daemon (the bootc base image needs no special build tooling; the bootc stage is inherited through the build).
 - The tag is the git-describe version (`git describe --tags --always --dirty`, leading `v` stripped, falls back to `latest`), so the image ref is `ghcr.io/snugmo/inglenook:<tag>` — e.g. `0.1.0`.
 - Registry defaults to `ghcr.io/snugmo`; `./images/build.sh push` publishes to GitHub Container Registry. For local dev / CI use `DEV_REGISTRY=localhost:5000`.
+- Passes `--build-arg VERSION=<tag>` and `--build-arg REVISION=$(git rev-parse HEAD)` for the `org.opencontainers.image.*` labels in the Containerfile (same convention as cote).
 
 ## Gotchas
 
