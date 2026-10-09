@@ -42,7 +42,8 @@ RUN useradd -m -u 1000 -s /bin/bash user \
 
 # Boot configuration. Ensure every regenerated initramfs carries the
 # virtio-vsock stack so ssh-over-vsock works with no IP in the guest.
+# (add_drivers is the dracut>=0.60 name for the old kmods directive.)
 # No serial-getty enablement is needed: systemd-getty-generator links a
 # serial-getty for each console= on the kernel command line (set in the UKI).
 RUN mkdir -p /etc/dracut.conf.d \
- && printf 'kmods+="vmw_vsock_virtio_transport"\n' > /etc/dracut.conf.d/99-vsock.conf
+ && printf 'add_drivers+=" vmw_vsock_virtio_transport virtio_net "\n' > /etc/dracut.conf.d/99-vsock.conf
