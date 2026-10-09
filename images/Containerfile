@@ -1,0 +1,7 @@
+# inglenook — a Fedora-based bootc OS image.
+#
+# Base: the earliest bootc-capable layer of the Fedora image "cake":
+# fedora-bootc is the bootc-ified fedora-minimal (kernel, ostree, bootc
+# tooling — no desktop/GUI). The layers above it (fedora, fedora-toolbox,
+# fedora-workstation) add progressively more, up to a full GUI at the top.
+FROM registry.fedoraproject.org/fedora-bootc:46
