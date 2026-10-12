@@ -44,11 +44,17 @@ RUN mkdir -p /usr/local/sbin \
 RUN dnf -y install \
       podman buildah skopeo git-core \
       openssh-clients yubikey-manager yubico-piv-tool pcsc-lite pcsc-lite-ccid opensc \
+      nss-mdns \
       systemd-boot-unsigned \
  && dnf clean all
 
 # Static files that belong in the image as they are (units, ...): see rootfs/.
 COPY rootfs/ /
+
+# systemd uses DEFAULT_HOSTNAME from os-release when /etc/hostname is absent, so
+# a wiped /etc still gets a sensible name; avahi advertises it as <name>.local
+# and the login banner (rootfs/usr/lib/issue.d) shows it with the IP addresses.
+RUN sed -i 's/^DEFAULT_HOSTNAME=.*/DEFAULT_HOSTNAME="inglenook"/' /usr/lib/os-release
 
 # Account & access. Default login account (UID 1000, shared with the cote
 # workspace images), declared with sysusers.d so systemd-sysusers re-creates it
