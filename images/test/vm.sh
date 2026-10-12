@@ -11,6 +11,10 @@
 #   vm.sh wait               wait until ssh works
 #   vm.sh stop               stop the VM
 #
+# Environment: TARGET_SIZE (install: disk size, default 20G), ESP_FILES (install:
+# tree copied into the ESP), BOOT_DEVICE=usb (start: attach the disk as a USB
+# stick instead of virtio).
+#
 # Debugging without a root login: VM_EXTRA_UNIT=path/to/x.service vm.sh start
 # injects that unit through the systemd.extra-unit.* credential (SMBIOS) and
 # pulls it into multi-user.target with a systemd.unit-dropin.* credential; with
@@ -39,7 +43,9 @@ stop_pid() { # pidfile
 }
 
 cmd_prep() {
-  [[ -f installer.img && ${1:-} != --force ]] && return
+  # Rebuild the installer disk when its scripts change, not only on --force.
+  local stamp; stamp=$(cat "$HERE/installer.sh" "$HERE/installer.service" | sha256sum | cut -d' ' -f1)
+  [[ -f installer.img && $(cat installer.stamp 2>/dev/null) == "$stamp" && ${1:-} != --force ]] && return
   podman pull -q "$BASE" >/dev/null
   local c kver
   c=$(podman create "$BASE")
@@ -61,15 +67,19 @@ cmd_prep() {
     mke2fs -q -t ext4 -L installer -d rootfs installer.img
     rm -rf rootfs' sh "$HERE"
   rm -f rootfs.tar
+  echo "$stamp" > installer.stamp
 }
 
 cmd_install() {
   local ref=${1:?usage: vm.sh install <image>}
   cmd_stop
-  rm -f share/result share/inglenook.oci target.img
+  rm -rf share/result share/inglenook.oci share/esp target.img
   echo "$ref" > share/imgref
+  # ESP_FILES: a directory tree copied into the ESP after the install (for
+  # example loader/credentials/*.cred).
+  [[ -n ${ESP_FILES:-} ]] && cp -r "$ESP_FILES" share/esp
   podman save --format oci-archive -o share/inglenook.oci "$ref"
-  truncate -s 20G target.img
+  truncate -s "${TARGET_SIZE:-20G}" target.img
   # SELinux off in the installer: its rootfs is unlabeled.
   timeout 900 qemu-system-x86_64 "${qemu_common[@]}" -serial file:installer.log \
     -kernel vmlinuz -initrd initramfs.img \
@@ -91,8 +101,14 @@ cmd_start() {
   local args=("${qemu_common[@]}" -serial file:target.log -daemonize -pidfile qemu.pid
     -qmp unix:qmp.sock,server,nowait
     -drive "if=pflash,format=raw,readonly=on,file=$OVMF/OVMF_CODE.fd"
-    -drive "if=pflash,format=raw,file=vars.fd"
-    -drive file=target.img,format=raw,if=virtio)
+    -drive "if=pflash,format=raw,file=vars.fd")
+  if [[ ${BOOT_DEVICE:-virtio} == usb ]]; then
+    # As a USB stick behind an xHCI controller, like on real hardware.
+    args+=(-device qemu-xhci,id=xhci -drive file=target.img,format=raw,if=none,id=usbdisk
+      -device usb-storage,bus=xhci.0,drive=usbdisk,bootindex=0)
+  else
+    args+=(-drive file=target.img,format=raw,if=virtio)
+  fi
   [[ -f key.pub ]] && args+=(-smbios "type=11,value=io.systemd.credential:ssh.authorized_keys.root=$(cat key.pub)")
   if [[ -n ${VM_EXTRA_UNIT:-} ]]; then
     local unit; unit=$(basename "$VM_EXTRA_UNIT")

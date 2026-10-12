@@ -14,6 +14,10 @@ podman run --rm --privileged --pid=host --security-opt label=disable \
   bootc install to-disk --composefs-backend --bootloader systemd --generic-image --wipe \
     --filesystem ext4 --skip-fetch-check /dev/vdb
 rc=$?
+if [ "$rc" -eq 0 ] && [ -d /mnt/share/esp ]; then
+  mkdir -p /mnt/esp
+  mount /dev/vdb2 /mnt/esp && cp -rT /mnt/share/esp /mnt/esp && sync && umount /mnt/esp || rc=1
+fi
 echo "INSTALL_EXIT=$rc" | tee /mnt/share/result
 sync
 systemctl poweroff -f
