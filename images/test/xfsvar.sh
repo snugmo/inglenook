@@ -19,7 +19,10 @@ mkdir -p "$WORK"
 "$vm" prep
 ref=$(SSH_PUBKEY=$(cat "$WORK/key.pub") KARGS="rw console=tty0 console=ttyS0,115200n8 inglenook.var=xfs" \
         "$REPO/images/build.sh" | tee /dev/stderr | sed -n 's/^built //p')
-ROOT_SIZE=${ROOT_SIZE:-12G} TARGET_SIZE=${TARGET_SIZE:-20G} "$vm" install "$ref"
+ROOT_SIZE=${ROOT_SIZE:-8G} TARGET_SIZE=${TARGET_SIZE:-14G} "$vm" install "$ref"
+# A real stick is larger than the image: the partition must also use the space
+# after the image's end (repart moves the backup GPT header).
+truncate -s "${DISK_SIZE:-20G}" "$WORK/target.img"
 
 fail=0
 check() { # description command-run-in-guest expected-output
@@ -29,6 +32,7 @@ check() { # description command-run-in-guest expected-output
 checks() {
   # stat -f: the filesystem of /var, not the mount stack (bootc's ext4 bind is under it)
   check "/var is xfs" 'stat -f -c %T /var' xfs
+  check "/var uses the whole disk" 'findmnt -rno SOURCE -t xfs /var | xargs lsblk -bno SIZE | awk "{print (\$1 > 10*2^30) ? \"yes\" : \"no\"}"' yes
   check "/var is the var partition" 'findmnt -rno SOURCE -t xfs /var | xargs lsblk -no PARTLABEL' var
   check "selinux is enforcing" 'getenforce' Enforcing
   check "no selinux denials" 'journalctl -q -b --no-pager | grep -ac "avc:  denied"' 0
