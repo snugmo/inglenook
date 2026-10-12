@@ -11,7 +11,7 @@
 #   vm.sh wait               wait until ssh works
 #   vm.sh stop               stop the VM
 #
-# Environment: TARGET_SIZE (install: disk size, default 20G), ESP_FILES (install:
+# Environment: VM_QEMU_EXTRA (start: extra qemu arguments), TARGET_SIZE (install: disk size, default 20G), ESP_FILES (install:
 # tree copied into the ESP), BOOT_DEVICE=usb (start: attach the disk as a USB
 # stick instead of virtio).
 #
@@ -110,6 +110,10 @@ cmd_start() {
     args+=(-drive file=target.img,format=raw,if=virtio)
   fi
   [[ -f key.pub ]] && args+=(-smbios "type=11,value=io.systemd.credential:ssh.authorized_keys.root=$(cat key.pub)")
+  # VM_QEMU_EXTRA: extra qemu arguments, word-split (e.g. a virtual smartcard
+  # reader: "-device usb-ccid").
+  # shellcheck disable=SC2206
+  [[ -n ${VM_QEMU_EXTRA:-} ]] && args+=($VM_QEMU_EXTRA)
   if [[ -n ${VM_EXTRA_UNIT:-} ]]; then
     local unit; unit=$(basename "$VM_EXTRA_UNIT")
     args+=(-smbios "type=11,value=io.systemd.credential.binary:systemd.extra-unit.$unit=$(base64 -w0 "$VM_EXTRA_UNIT")"
