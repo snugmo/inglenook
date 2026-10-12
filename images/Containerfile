@@ -29,6 +29,13 @@ LABEL org.opencontainers.image.title="inglenook" \
       org.opencontainers.image.revision="${REVISION}" \
       org.opencontainers.image.base.name="registry.fedoraproject.org/fedora-bootc:${FEDORA_VERSION}"
 
+# Base image fixups, so the boot journal is clean on a read-only root:
+# tmpfiles.d (rpm-ostree-0-integration.conf) wants /usr/local/sbin, which the
+# base lacks, and root.conf's `z / 555` tries to fchmod the composefs root,
+# whose mode a container build cannot change (it stays 0755), so drop the rule.
+RUN mkdir -p /usr/local/sbin \
+ && sed -i '/^z \/ 555 /d' /usr/lib/tmpfiles.d/root.conf
+
 # Account & access. Default login account (UID 1000, shared with the cote
 # workspace images), declared with sysusers.d so systemd-sysusers re-creates it
 # at boot if /etc was wiped (no useradd at build time; /etc/passwd is not part
