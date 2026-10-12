@@ -33,7 +33,7 @@ checks() {
   check "selinux is enforcing" 'getenforce' Enforcing
   check "subuid restored for rootless podman" 'cut -d: -f1 /etc/subuid' user
   check "no failed units" 'systemctl --failed --no-legend | wc -l' 0
-  check "no selinux denials" 'journalctl -b --no-pager | grep -ac "avc:  denied"' 0
+  check "no selinux denials" 'journalctl -q -b --no-pager | grep -ac "avc:  denied"' 0
   check "no journal errors" 'journalctl -b -p err --no-pager -q | grep -avE "virt/tdx" | cut -c1-200 | head -5' ''
 }
 

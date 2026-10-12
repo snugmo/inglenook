@@ -25,7 +25,7 @@ check() { # description command-run-in-guest expected-output
   if [[ $got == "$3" ]]; then echo "ok   $1"; else echo "FAIL $1: got '$got', want '$3'"; fail=1; fi
 }
 check "selinux is enforcing" 'getenforce' Enforcing
-check "no selinux denials" 'journalctl -b --no-pager | grep -ac "avc:  denied"' 0
+check "no selinux denials" 'journalctl -q -b --no-pager | grep -ac "avc:  denied"' 0
 # Kernel noise a VM cannot avoid is filtered: TDX probing on non-TDX hosts.
 check "no journal errors" 'journalctl -b -p err --no-pager -q | grep -avE "virt/tdx" | cut -c1-200 | head -5' ''
 check "no failed units" 'systemctl --failed --no-legend | wc -l' 0
