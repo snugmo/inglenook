@@ -59,8 +59,7 @@ RUN sed -i 's/^DEFAULT_HOSTNAME=.*/DEFAULT_HOSTNAME="inglenook"/' /usr/lib/os-re
 # Account & access. Default login account (UID 1000, shared with the cote
 # workspace images), declared with sysusers.d so systemd-sysusers re-creates it
 # at boot if /etc was wiped (no useradd at build time; /etc/passwd is not part
-# of the image's contract; wheel is declared too, as its only definition is in
-# the /etc/group that a wipe removes). A plain passwd entry is deliberate: a userdb
+# of the image's contract). A plain passwd entry is deliberate: a userdb
 # drop-in record was not visible to setuid sudo. The agent pubkey is baked in
 # at build time via --build-arg SSH_PUBKEY=… into a root-owned file under /usr;
 # tmpfiles.d symlinks it as ~/.ssh/authorized_keys. That path is the one place
@@ -70,7 +69,7 @@ RUN sed -i 's/^DEFAULT_HOSTNAME=.*/DEFAULT_HOSTNAME="inglenook"/' /usr/lib/os-re
 # is needed. SSH host keys are generated on first sshd run.
 ARG SSH_PUBKEY=
 RUN mkdir -p /usr/lib/ssh/authorized_keys \
- && printf 'g wheel 10\ng user 1000\nu user 1000:user "user" /var/home/user /bin/bash\nm user wheel\n' > /usr/lib/sysusers.d/inglenook-user.conf \
+ && printf 'g user 1000\nu user 1000:user "user" /var/home/user /bin/bash\nm user wheel\n' > /usr/lib/sysusers.d/inglenook-user.conf \
  && printf '%s\n' "$SSH_PUBKEY" > /usr/lib/ssh/authorized_keys/user \
  && chmod 0644 /usr/lib/ssh/authorized_keys/user \
  && printf 'd /var/home/user 0700 user user -\nd /var/home/user/.ssh 0700 user user -\nL+ /var/home/user/.ssh/authorized_keys - - - - /usr/lib/ssh/authorized_keys/user\n' > /usr/lib/tmpfiles.d/inglenook-user.conf
@@ -86,16 +85,17 @@ RUN printf 'user:524288:65536\n' > /etc/subuid \
 # The image must boot with /etc wiped, so a snapshot of the finished /etc goes
 # to /usr/share/factory/etc and tmpfiles.d restores each top-level entry that
 # is missing (`C` copies from there when the destination does not exist; `!`
-# limits it to boot time). Account databases are left out on purpose: sysusers.d
-# is their source of truth (see Account & access); so are per-machine files
-# and credstore*, which systemd manages itself. /etc/selinux is among the
-# restored entries, so the policy comes back too. The generated rule file is
-# derived from the snapshot, so it cannot drift.
+# limits it to boot time). passwd/group/shadow/gshadow are restored too: system
+# accounts live in /usr/lib/{passwd,group} (nss-altfiles), and sysusers can only
+# add `user` to wheel if wheel is also in /etc/group. The `-` backup copies,
+# per-machine files and credstore*, which systemd manages itself, are left out.
+# /etc/selinux is among the restored entries, so the policy comes back too. The
+# generated rule file is derived from the snapshot, so it cannot drift.
 RUN rm -rf /usr/share/factory/etc \
  && mkdir -p /usr/share/factory \
  && cp -a /etc /usr/share/factory/etc \
  && cd /usr/share/factory/etc \
- && rm -f passwd passwd- shadow shadow- group group- gshadow gshadow- \
+ && rm -f passwd- shadow- group- gshadow- \
           machine-id hostname resolv.conf mtab \
  && rm -rf credstore credstore.encrypted \
  && { echo '# Generated at image build time from /usr/share/factory/etc.'; \
