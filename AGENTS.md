@@ -16,7 +16,8 @@ Layout:
 ```
 images/
   Containerfile  # The OS image: Fedora base + packages + host configuration
-  build.sh       # two-pass buildah wrapper: base -> composefs digest -> UKI image
+  build.sh       # buildah wrapper: pre -> mkosi initrd -> base -> composefs digest -> UKI image
+  initrd/        # mkosi config for the initrd (replaces dracut): mkosi.conf + mkosi.extra/
   test/          # Rootless QEMU/KVM smoke test (vm.sh, smoke.sh); work dir is build/vm
 docs/            # On-demand reference docs — read when relevant (see below)
 ```
@@ -25,7 +26,7 @@ docs/            # On-demand reference docs — read when relevant (see below)
 
 | Task                     | Command                                                                          |
 | ------------------------ | -------------------------------------------------------------------------------- |
-| Build bootc OCI image    | `./images/build.sh` (two passes; a plain `buildah build` fails: the `uki` stage needs `COMPOSEFS_DIGEST`) |
+| Build bootc OCI image    | `./images/build.sh` (needs mkosi; a plain `buildah build` fails: the `initrd` build context and `COMPOSEFS_DIGEST` are required) |
 | Build + push to ghcr     | `./images/build.sh push`                                                          |
 | Smoke-test the image     | `./images/test/smoke.sh` (build, install, boot over vsock, check; needs KVM, OVMF, vhost-device-vsock) |
 | Install image to disk    | `bootc install` (from inside a running container)                                 |
@@ -68,11 +69,12 @@ docs/            # On-demand reference docs — read when relevant (see below)
 4. **Update, don't reinstall**: deployed hosts are updated with `bootc upgrade` (or `bootc switch` to change image). Re-running `bootc install` on an already-installed host is not the update path.
 5. **Layer caching**: the bootc stage must stay last; do not reorder instructions above it without understanding the stage architecture.
 
-6. **The UKI embeds the image digest**: the UKI's `composefs=<digest>` must equal the composefs digest of the finished rootfs, so `build.sh` builds the `base` target, computes the digest with `bootc container compute-composefs-digest-from-storage`, then builds the final image with `COMPOSEFS_DIGEST`. Do not use `bootc container ukify --rootfs` in the Containerfile — it measures a mount whose directory mtimes are the layer-extraction time, which never matches what `bootc install` computes. `/boot` is excluded from the digest, so the UKI itself can be added last. Build with layer caching (`--layers`): a rebuilt base has different contents and a different digest; `build.sh` fails if the final image's digest differs.
-7. **`rw` on the UKI command line**: without it `/sysroot` mounts read-only and the `/var` and `/etc` binds inherit that, so `/var` is read-only and services fail.
+6. **No dracut**: the initrd is built by mkosi (`images/initrd`) from the `pre` stage's kernel modules and bootc's `initramfs-setup`/`bootc-root-setup.service`, and installed as `/usr/lib/modules/<kver>/initramfs.img` in the `base` stage. Anything the initrd needs (modules, units) is mkosi config, not a dracut module. The initrd is part of the composefs digest, so it must be in place before the digest is computed.
+7. **The UKI embeds the image digest**: the UKI's `composefs=<digest>` must equal the composefs digest of the finished rootfs, so `build.sh` builds the `base` target, computes the digest with `bootc container compute-composefs-digest-from-storage`, then builds the final image with `COMPOSEFS_DIGEST`. Do not use `bootc container ukify --rootfs` in the Containerfile — it measures a mount whose directory mtimes are the layer-extraction time, which never matches what `bootc install` computes. `/boot` is excluded from the digest, so the UKI itself can be added last. Build with layer caching (`--layers`): a rebuilt base has different contents and a different digest; `build.sh` fails if the final image's digest differs.
+8. **`rw` on the UKI command line**: without it `/sysroot` mounts read-only and the `/var` and `/etc` binds inherit that, so `/var` is read-only and services fail.
 
-8. **No loop devices / root in the dev container**: `bootc install` therefore runs inside a throwaway installer VM (`images/test/vm.sh install`), not on the host. Never debug a stale image: `vm.sh` passes the image ref through the 9p share, and the installer removes the old tag before loading.
-9. **Login and SSH**: the `user` account comes from `sysusers.d` (a userdb drop-in record was invisible to setuid `sudo`), the baked pubkey is `/usr/lib/ssh/authorized_keys/user` symlinked as `~/.ssh/authorized_keys` by `tmpfiles.d`. ssh-over-vsock's per-connection sshd overrides `AuthorizedKeysFile` (only `ssh.ephemeral-authorized_keys-all` plus `~/.ssh/authorized_keys`), which is why no sshd drop-in is used. On Fedora 45 prerelease SELinux denies sshd-session reading that credential, so the credential route does not work yet.
+9. **No loop devices / root in the dev container**: `bootc install` therefore runs inside a throwaway installer VM (`images/test/vm.sh install`), not on the host. Never debug a stale image: `vm.sh` passes the image ref through the 9p share, and the installer removes the old tag before loading.
+10. **Login and SSH**: the `user` account comes from `sysusers.d` (a userdb drop-in record was invisible to setuid `sudo`), the baked pubkey is `/usr/lib/ssh/authorized_keys/user` symlinked as `~/.ssh/authorized_keys` by `tmpfiles.d`. ssh-over-vsock's per-connection sshd overrides `AuthorizedKeysFile` (only `ssh.ephemeral-authorized_keys-all` plus `~/.ssh/authorized_keys`), which is why no sshd drop-in is used. On Fedora 45 prerelease SELinux denies sshd-session reading that credential, so the credential route does not work yet.
 
 ## Adding New Components
 
