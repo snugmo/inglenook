@@ -55,14 +55,25 @@ The password only takes effect on the first boot, when the account is created.
 `sudo` asks for a password, so the console password doubles as the sudo
 password. (Passwordless sudo is a decision still open.)
 
+## What was verified (in QEMU, not on hardware)
+
+The image was booted as a USB mass-storage device behind an xHCI controller
+with a wired (DHCP) NIC, SELinux enforcing, and checked for: no failed units, no
+AVC denials, no journal errors; ssh key login; console/ssh password login from
+the ESP credential and `sudo` with it; rootless podman pulling and running an
+image; `pcscd` reachable over ssh with a virtual CCID reader (so `ykman`,
+`yubico-piv-tool` and OpenSC can talk to it; wheel members are allowed by a
+polkit rule); hostname `inglenook`. Not testable here: a real YubiKey, the
+Intel iGPU/NIC drivers, your firmware's boot menu.
+
 ## What to try
 
 - `podman run --rm -it registry.fedoraproject.org/fedora echo hi` (rootless
   podman; `buildah`, `skopeo` and `git` are installed too).
 - A YubiKey: `ykman info`, `ykman piv info` (`pcscd` starts on demand through
   its socket), `ssh-keygen -D /usr/lib64/pkcs11/opensc-pkcs11.so` for PIV keys.
-  If `ykman` cannot see the key, send me the output of `lsusb` and
-  `journalctl -b | grep -i -E 'pcsc|yubi|udev'`.
+  If `ykman` cannot see the key, note the output of `lsusb`, `opensc-tool -l`
+  and `journalctl -b | grep -i -E 'pcsc|yubi|udev|avc'`.
 - Reboot and check `bootc status`.
 
 ## Known limits
