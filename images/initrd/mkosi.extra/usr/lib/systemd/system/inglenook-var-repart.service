@@ -1,0 +1,18 @@
+[Unit]
+Description=Create the XFS /var partition in the free space after the root
+DefaultDependencies=no
+ConditionKernelCommandLine=inglenook.var=xfs
+ConditionPathExists=/etc/initrd-release
+After=sysroot.mount
+Requires=sysroot.mount
+Before=bootc-root-setup.service
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+# The definition is kept out of /usr/lib/repart.d on purpose: files there make
+# the stock systemd-repart.service run in the initrd, where it fails.
+# Idempotent: with the partition already there repart finds nothing to do. It
+# works on the disk that backs /sysroot, which is still the plain ext4 root at
+# this point (bootc-root-setup has not run).
+ExecStart=systemd-repart --dry-run=no --root=/sysroot --definitions=/usr/lib/inglenook/repart.d --no-pager
