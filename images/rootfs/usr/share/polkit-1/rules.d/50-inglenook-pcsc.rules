@@ -1,0 +1,10 @@
+// pcsc-lite only grants smartcard access (YubiKey PIV, OpenSC, ykman) to
+// *active local* sessions, so none of it works over ssh. This is a single-user
+// workstation whose owner is in wheel: allow them from any session.
+polkit.addRule(function(action, subject) {
+    if ((action.id == "org.debian.pcsc-lite.access_pcsc" ||
+         action.id == "org.debian.pcsc-lite.access_card") &&
+        subject.isInGroup("wheel")) {
+        return polkit.Result.YES;
+    }
+});
