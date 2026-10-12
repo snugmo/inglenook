@@ -36,6 +36,17 @@ LABEL org.opencontainers.image.title="inglenook" \
 RUN mkdir -p /usr/local/sbin \
  && sed -i '/^z \/ 555 /d' /usr/lib/tmpfiles.d/root.conf
 
+# Packages. podman, skopeo and openssh-clients are already in the base; they are
+# listed so the image states its intent (container dev environment, ssh and
+# hardware keys). pcsc-lite is for smartcard/PIV YubiKeys (pcscd.socket is
+# preset-enabled), opensc provides the PKCS#11 module ssh uses with PIV.
+# systemd-boot-unsigned is the loader bootc installs (--bootloader systemd).
+RUN dnf -y install \
+      podman buildah skopeo git-core \
+      openssh-clients yubikey-manager yubico-piv-tool pcsc-lite pcsc-lite-ccid opensc \
+      systemd-boot-unsigned \
+ && dnf clean all
+
 # Account & access. Default login account (UID 1000, shared with the cote
 # workspace images), declared with sysusers.d so systemd-sysusers re-creates it
 # at boot if /etc was wiped (no useradd at build time; /etc/passwd is not part
@@ -54,11 +65,8 @@ RUN mkdir -p /usr/lib/ssh/authorized_keys \
  && chmod 0644 /usr/lib/ssh/authorized_keys/user \
  && printf 'd /var/home/user 0700 user user -\nd /var/home/user/.ssh 0700 user user -\nL+ /var/home/user/.ssh/authorized_keys - - - - /usr/lib/ssh/authorized_keys/user\n' > /usr/lib/tmpfiles.d/inglenook-user.conf
 
-# UEFI boot. bootc installs systemd-boot (--bootloader systemd) and boots a
-# UKI; there is no GRUB. systemd-boot-unsigned provides the loader binary
-# bootc copies to the ESP.
-RUN dnf -y install systemd-boot-unsigned \
- && dnf clean all
+# UEFI boot: bootc installs systemd-boot (--bootloader systemd) and boots a
+# UKI; there is no GRUB. The loader comes from systemd-boot-unsigned (above).
 
 # Initrd stage. dracut is not used: build.sh builds the initrd with mkosi
 # (images/initrd) from this `pre` stage's kernel modules and bootc binary, and
