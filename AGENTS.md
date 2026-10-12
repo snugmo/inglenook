@@ -45,7 +45,7 @@ docs/            # On-demand reference docs — read when relevant (see below)
 
 ### OS Image (`Containerfile`)
 
-- Based on **Fedora 46** via `registry.fedoraproject.org/fedora-bootc:46` — the earliest bootc-capable layer of the Fedora image cake (bootc-ified `fedora-minimal`, no desktop/GUI), not UBI; runs as non-root user `user` (UID 1000).
+- Based on **Fedora 45** via `registry.fedoraproject.org/fedora-bootc:45` (a single `FEDORA_VERSION` build arg drives the `FROM` and the base.name label; we stay off Rawhide/46 on purpose, so upstream pre-release bugs don't mask our own tooling issues) — the earliest bootc-capable layer of the Fedora image cake (bootc-ified `fedora-minimal`, no desktop/GUI), not UBI; runs as non-root user `user` (UID 1000).
 - The final stage must be a bootc stage — our base already is, and the stage is inherited through added layers. Never base a stage on a *non*-bootc image without adding a `switch-to-bootc-container` step.
 - All binary downloads are verified as far as possible (SHA-256 `ADD --checksum=…`, cosign signatures, or SLSA provenance).
 - Order instructions least-to-most frequently changing; package installs before configuration, to maximize layer reuse.
