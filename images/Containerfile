@@ -30,17 +30,24 @@ LABEL org.opencontainers.image.title="inglenook" \
       org.opencontainers.image.base.name="registry.fedoraproject.org/fedora-bootc:${FEDORA_VERSION}"
 
 # Account & access. Default login account (UID 1000, shared with the cote
-# workspace images). The agent pubkey is baked in at build time via
-# --build-arg SSH_PUBKEY=… (empty by default). SSH host keys are generated
-# on first sshd run; the ssh-over-vsock listener is generated at boot by
-# systemd-ssh-generator when a vsock device is present.
+# workspace images), declared as a systemd-userdb record in /usr so that it
+# survives a wiped /etc and /var (nss-systemd resolves it; there is no
+# passwd entry). The agent pubkey is baked in at build time via
+# --build-arg SSH_PUBKEY=… into a root-owned file under /usr, which sshd reads
+# through AuthorizedKeysFile (userdbctl ssh-authorized-keys returns nothing
+# for drop-in records, so it is not used). The sshd drop-in is a factory
+# default under /usr/share/factory/etc, copied into /etc by tmpfiles.d if /etc
+# lacks it. SSH host keys are generated on first sshd run; the ssh-over-vsock
+# listener is generated at boot by systemd-ssh-generator when a vsock device
+# is present.
 ARG SSH_PUBKEY=
-RUN useradd -m -u 1000 -s /bin/bash user \
- && mkdir -p /home/user/.ssh \
- && echo "$SSH_PUBKEY" > /home/user/.ssh/authorized_keys \
- && chown -R user:user /home/user/.ssh \
- && chmod 700 /home/user/.ssh \
- && chmod 600 /home/user/.ssh/authorized_keys
+RUN mkdir -p /usr/lib/userdb /usr/lib/ssh/authorized_keys /usr/share/factory/etc/ssh/sshd_config.d \
+ && printf '{"userName":"user","realName":"user","uid":1000,"gid":1000,"disposition":"regular","homeDirectory":"/var/home/user","shell":"/bin/bash","memberOf":["wheel"]}\n' > /usr/lib/userdb/user.user \
+ && printf '{"groupName":"user","gid":1000,"disposition":"regular"}\n' > /usr/lib/userdb/user.group \
+ && printf '%s\n' "$SSH_PUBKEY" > /usr/lib/ssh/authorized_keys/user \
+ && chmod 0644 /usr/lib/ssh/authorized_keys/user \
+ && printf 'AuthorizedKeysFile /usr/lib/ssh/authorized_keys/%%u .ssh/authorized_keys\n' > /usr/share/factory/etc/ssh/sshd_config.d/60-inglenook-keys.conf \
+ && printf 'd /var/home/user 0700 user user -\nC /etc/ssh/sshd_config.d/60-inglenook-keys.conf\n' > /usr/lib/tmpfiles.d/inglenook-user.conf
 
 # Boot configuration. Ensure every regenerated initramfs carries the
 # virtio-vsock stack so ssh-over-vsock works with no IP in the guest.
