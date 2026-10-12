@@ -22,7 +22,9 @@
 # --with-key=null --name=<name> - <name>.cred`, e.g.
 # ssh.authorized_keys.root or passwd.hashed-password.user.
 #
-# Environment: TARGET_SIZE (default 14G; must fit the stick).
+# Environment: TARGET_SIZE (default 14G; must fit the stick); XFS_VAR=1 builds the
+# opt-in variant with all of /var on an XFS partition that fills the rest of the
+# stick (ROOT_SIZE, default 8G, is the root partition; see AGENTS.md).
 set -euo pipefail
 
 HERE=$(cd "$(dirname "$0")" && pwd)
@@ -47,11 +49,16 @@ openssl passwd -6 -stdin < "$WORK/password" | tr -d '\n' \
 
 # console= order: the last one becomes /dev/console, so tty0 (the screen) goes
 # last; ttyS0 still receives the kernel log for machines with a serial port.
-ref=$(SSH_PUBKEY=$(cat "$WORK/key.pub") KARGS="rw console=ttyS0,115200n8 console=tty0" \
+kargs="rw console=ttyS0,115200n8 console=tty0"
+if [[ ${XFS_VAR:-} == 1 ]]; then
+  kargs+=" inglenook.var=xfs"
+  ROOT_SIZE=${ROOT_SIZE:-8G}
+fi
+ref=$(SSH_PUBKEY=$(cat "$WORK/key.pub") KARGS="$kargs" \
         "$REPO/images/build.sh" | tee /dev/stderr | sed -n 's/^built //p')
 
 "$vm" prep
-ESP_FILES=$WORK/esp TARGET_SIZE=${TARGET_SIZE:-14G} "$vm" install "$ref"
+ESP_FILES=$WORK/esp TARGET_SIZE=${TARGET_SIZE:-14G} ROOT_SIZE=${ROOT_SIZE:-} "$vm" install "$ref"
 
 rm -f "$WORK/inglenook.img"
 mv "$WORK/target.img" "$WORK/inglenook.img"
