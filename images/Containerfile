@@ -5,7 +5,7 @@
 # tooling — no desktop/GUI). The layers above it (fedora, fedora-toolbox,
 # fedora-workstation) add progressively more, up to a full GUI at the top.
 ARG FEDORA_VERSION=45
-FROM registry.fedoraproject.org/fedora-bootc:${FEDORA_VERSION} AS base
+FROM registry.fedoraproject.org/fedora-bootc:${FEDORA_VERSION} AS pre
 
 # OCI well-known image labels (image-spec annotations.md). VERSION/REVISION
 # are passed by build.sh via --build-arg; the defaults keep ad-hoc
@@ -47,19 +47,22 @@ RUN mkdir -p /usr/lib/ssh/authorized_keys \
  && chmod 0644 /usr/lib/ssh/authorized_keys/user \
  && printf 'd /var/home/user 0700 user user -\nd /var/home/user/.ssh 0700 user user -\nL+ /var/home/user/.ssh/authorized_keys - - - - /usr/lib/ssh/authorized_keys/user\n' > /usr/lib/tmpfiles.d/inglenook-user.conf
 
-# Boot configuration. Ensure every regenerated initramfs carries the
-# virtio-vsock stack so ssh-over-vsock works with no IP in the guest.
-# (add_drivers is the dracut>=0.60 name for the old kmods directive.)
-# No serial-getty enablement is needed: systemd-getty-generator links a
-# serial-getty for each console= on the kernel command line (set in the UKI).
-RUN mkdir -p /etc/dracut.conf.d \
- && printf 'add_drivers+=" vmw_vsock_virtio_transport virtio_net "\n' > /etc/dracut.conf.d/99-vsock.conf
-
 # UEFI boot. bootc installs systemd-boot (--bootloader systemd) and boots a
 # UKI; there is no GRUB. systemd-boot-unsigned provides the loader binary
 # bootc copies to the ESP.
 RUN dnf -y install systemd-boot-unsigned \
  && dnf clean all
+
+# Initrd stage. dracut is not used: build.sh builds the initrd with mkosi
+# (images/initrd) from this `pre` stage's kernel modules and bootc binary, and
+# passes it in as the named build context `initrd`. It replaces the stock
+# initramfs and is part of the rootfs the UKI's composefs digest covers, so it
+# must land here, before the digest is computed. The mkosi initrd already
+# carries the virtio and vsock drivers, so no dracut drop-in is needed.
+FROM pre AS base
+RUN --mount=type=bind,from=initrd,target=/initrd \
+    set -e; set -- /usr/lib/modules/*; test $# -eq 1 \
+ && install -m0644 /initrd/initrd.cpio.zst "$1/initramfs.img"
 
 # UKI stage. The UKI's command line carries composefs=<digest> of the
 # *finished* base rootfs, which is computed by build.sh from the stored
