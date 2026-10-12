@@ -4,13 +4,15 @@
 # fedora-bootc is the bootc-ified fedora-minimal (kernel, ostree, bootc
 # tooling — no desktop/GUI). The layers above it (fedora, fedora-toolbox,
 # fedora-workstation) add progressively more, up to a full GUI at the top.
-FROM registry.fedoraproject.org/fedora-bootc:46
+ARG FEDORA_VERSION=45
+FROM registry.fedoraproject.org/fedora-bootc:${FEDORA_VERSION}
 
 # OCI well-known image labels (image-spec annotations.md). VERSION/REVISION
 # are passed by build.sh via --build-arg; the defaults keep ad-hoc
 # `buildah build -f` invocations valid. org.opencontainers.image.created is
 # set automatically by buildah/podman, and base.digest is intentionally not
 # set (it changes with every base rebuild, so a static value would go stale).
+ARG FEDORA_VERSION
 ARG VERSION=latest
 ARG REVISION=unknown
 
@@ -25,7 +27,7 @@ LABEL org.opencontainers.image.title="inglenook" \
       org.opencontainers.image.ref.name="inglenook" \
       org.opencontainers.image.version="${VERSION}" \
       org.opencontainers.image.revision="${REVISION}" \
-      org.opencontainers.image.base.name="registry.fedoraproject.org/fedora-bootc:46"
+      org.opencontainers.image.base.name="registry.fedoraproject.org/fedora-bootc:${FEDORA_VERSION}"
 
 # Account & access. Default login account (UID 1000, shared with the cote
 # workspace images). The agent pubkey is baked in at build time via
