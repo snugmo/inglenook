@@ -1,0 +1,9 @@
+[Unit]
+Description=Wipe /etc and /var, then power off (stateless-boot test, see wipe.sh)
+After=multi-user.target
+
+[Service]
+Type=oneshot
+# Everything, including dotfiles; busy mount points and files are skipped.
+ExecStart=/bin/sh -c 'rm -rf /etc/* /etc/.[!.]* /var/* /var/.[!.]* 2>/dev/null; sync; true'
+ExecStart=/usr/bin/systemctl poweroff --force

@@ -11,6 +11,11 @@
 #   vm.sh wait               wait until ssh works
 #   vm.sh stop               stop the VM
 #
+# Debugging without a root login: VM_EXTRA_UNIT=path/to/x.service vm.sh start
+# injects that unit through the systemd.extra-unit.* credential (SMBIOS) and
+# pulls it into multi-user.target with a systemd.unit-dropin.* credential; with
+# StandardOutput=tty its output lands in $WORK/target.log (the serial console).
+#
 # vsock mode has no NIC at all: ssh goes over vhost-device-vsock. net mode
 # forwards host port 2222. The VM also gets $WORK/key.pub as root's
 # authorized key (SMBIOS credential) for debugging.
@@ -82,11 +87,18 @@ cmd_start() {
   cmd_stop
   echo "$mode" > mode
   cp "$OVMF/OVMF_VARS.fd" vars.fd
+  rm -f qmp.sock
   local args=("${qemu_common[@]}" -serial file:target.log -daemonize -pidfile qemu.pid
+    -qmp unix:qmp.sock,server,nowait
     -drive "if=pflash,format=raw,readonly=on,file=$OVMF/OVMF_CODE.fd"
     -drive "if=pflash,format=raw,file=vars.fd"
     -drive file=target.img,format=raw,if=virtio)
   [[ -f key.pub ]] && args+=(-smbios "type=11,value=io.systemd.credential:ssh.authorized_keys.root=$(cat key.pub)")
+  if [[ -n ${VM_EXTRA_UNIT:-} ]]; then
+    local unit; unit=$(basename "$VM_EXTRA_UNIT")
+    args+=(-smbios "type=11,value=io.systemd.credential.binary:systemd.extra-unit.$unit=$(base64 -w0 "$VM_EXTRA_UNIT")"
+      -smbios "type=11,value=io.systemd.credential.binary:systemd.unit-dropin.multi-user.target=$(printf '[Unit]\nWants=%s\n' "$unit" | base64 -w0)")
+  fi
   case $mode in
     vsock)
       rm -f vhost.sock vm.vsock*
@@ -120,6 +132,19 @@ cmd_wait() {
   return 1
 }
 
-cmd_stop() { stop_pid qemu.pid; stop_pid vsockd.pid; }
+# Press the ACPI power button over QMP so the guest shuts down cleanly (a kill
+# loses recent writes: ext4 delayed allocation leaves zero-length files); fall
+# back to killing qemu after 40 s.
+cmd_stop() {
+  if [[ -f qemu.pid ]] && kill -0 "$(cat qemu.pid)" 2>/dev/null; then
+    if [[ -S qmp.sock ]]; then
+      printf '{"execute":"qmp_capabilities"}\n{"execute":"system_powerdown"}\n' \
+        | socat - UNIX-CONNECT:qmp.sock >/dev/null 2>&1 || true
+      for _ in $(seq 40); do kill -0 "$(cat qemu.pid)" 2>/dev/null || break; sleep 1; done
+    fi
+  fi
+  stop_pid qemu.pid
+  stop_pid vsockd.pid
+}
 
 "cmd_${1:?usage: vm.sh prep|install|start|ssh|wait|stop}" "${@:2}"
