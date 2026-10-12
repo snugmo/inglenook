@@ -5,7 +5,7 @@
 # tooling — no desktop/GUI). The layers above it (fedora, fedora-toolbox,
 # fedora-workstation) add progressively more, up to a full GUI at the top.
 ARG FEDORA_VERSION=45
-FROM registry.fedoraproject.org/fedora-bootc:${FEDORA_VERSION}
+FROM registry.fedoraproject.org/fedora-bootc:${FEDORA_VERSION} AS base
 
 # OCI well-known image labels (image-spec annotations.md). VERSION/REVISION
 # are passed by build.sh via --build-arg; the defaults keep ad-hoc
@@ -49,3 +49,39 @@ RUN useradd -m -u 1000 -s /bin/bash user \
 # serial-getty for each console= on the kernel command line (set in the UKI).
 RUN mkdir -p /etc/dracut.conf.d \
  && printf 'add_drivers+=" vmw_vsock_virtio_transport virtio_net "\n' > /etc/dracut.conf.d/99-vsock.conf
+
+# UEFI boot. bootc installs systemd-boot (--bootloader systemd) and boots a
+# UKI; there is no GRUB. systemd-boot-unsigned provides the loader binary
+# bootc copies to the ESP.
+RUN dnf -y install systemd-boot-unsigned \
+ && dnf clean all
+
+# UKI stage. The UKI's command line carries composefs=<digest> of the
+# *finished* base rootfs, which is computed by build.sh from the stored
+# layers of the `base` target (`bootc container compute-composefs-digest-
+# from-storage`) and passed in as COMPOSEFS_DIGEST. `bootc container ukify`
+# is deliberately not used: it measures a mounted rootfs, whose directory
+# mtimes are the layer-extraction time and so never match the digest bootc
+# computes at install time. /boot is excluded from the digest, so adding the
+# UKI to the final image does not invalidate it. ukify stays out of the image.
+# The leading "?" makes fs-verity optional (build.sh builds for VM testing).
+FROM base AS uki
+ARG COMPOSEFS_DIGEST
+# rw: the composefs root and the /var, /etc binds from /sysroot inherit its
+# mount flags, and nothing else remounts /sysroot read-write.
+ARG KARGS="rw console=tty0 console=ttyS0,115200n8"
+RUN test -n "$COMPOSEFS_DIGEST" || { echo "COMPOSEFS_DIGEST not set; build with images/build.sh" >&2; exit 1; }
+RUN dnf -y install systemd-ukify && dnf clean all
+RUN kver=$(ls /usr/lib/modules) \
+ && mkdir -p /out \
+ && ukify build \
+      --linux "/usr/lib/modules/$kver/vmlinuz" \
+      --initrd "/usr/lib/modules/$kver/initramfs.img" \
+      --uname "$kver" \
+      --os-release @/usr/lib/os-release \
+      --cmdline "$KARGS composefs=?$COMPOSEFS_DIGEST" \
+      --output /out/inglenook.efi
+
+# Final stage: must stay last and bootc-based (see AGENTS.md).
+FROM base
+COPY --from=uki /out/inglenook.efi /boot/EFI/Linux/inglenook.efi
