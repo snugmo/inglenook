@@ -133,6 +133,10 @@ ARG COMPOSEFS_DIGEST
 # rw: the composefs root and the /var, /etc binds from /sysroot inherit its
 # mount flags, and nothing else remounts /sysroot read-write.
 ARG KARGS="rw console=tty0 console=ttyS0,115200n8"
+# The initrd's own systemd sets the hostname from *its* os-release before the
+# real root starts, so DEFAULT_HOSTNAME in the image's os-release is not enough;
+# a static /etc/hostname still overrides systemd.hostname=.
+ARG DEFAULT_HOSTNAME=inglenook
 RUN test -n "$COMPOSEFS_DIGEST" || { echo "COMPOSEFS_DIGEST not set; build with images/build.sh" >&2; exit 1; }
 RUN dnf -y install systemd-ukify && dnf clean all
 RUN kver=$(ls /usr/lib/modules) \
@@ -142,7 +146,7 @@ RUN kver=$(ls /usr/lib/modules) \
       --initrd "/usr/lib/modules/$kver/initramfs.img" \
       --uname "$kver" \
       --os-release @/usr/lib/os-release \
-      --cmdline "$KARGS composefs=?$COMPOSEFS_DIGEST" \
+      --cmdline "$KARGS systemd.hostname=$DEFAULT_HOSTNAME composefs=?$COMPOSEFS_DIGEST" \
       --output /out/inglenook.efi
 
 # Final stage: must stay last and bootc-based (see AGENTS.md).
