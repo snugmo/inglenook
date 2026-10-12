@@ -1,0 +1,12 @@
+[Unit]
+Description=Install the image under test onto /dev/vdb
+After=local-fs.target
+Wants=local-fs.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/installer.sh
+StandardOutput=journal+console
+
+[Install]
+WantedBy=multi-user.target
