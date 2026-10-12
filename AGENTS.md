@@ -31,6 +31,7 @@ docs/            # On-demand reference docs — read when relevant (see below)
 | Build bootc OCI image    | `./images/build.sh` (needs mkosi; a plain `buildah build` fails: the `initrd` build context and `COMPOSEFS_DIGEST` are required) |
 | Build + push to ghcr     | `./images/build.sh push`                                                          |
 | Stateless-boot test      | `./images/test/wipe.sh` (after smoke.sh: wipes /etc and /var, boots twice, checks SELinux and the journal) |
+| XFS /var variant test    | `./images/test/xfsvar.sh` (builds with `inglenook.var=xfs`, installs with `--root-size`, grows the disk, checks the XFS /var) |
 | Build a USB stick image  | `./images/usb.sh` then `dd` build/usb/inglenook.img to the stick (see the script header) |
 | Smoke-test the image     | `./images/test/smoke.sh` (build, install, boot over vsock, check; needs KVM, OVMF, vhost-device-vsock) |
 | Install image to disk    | `bootc install` (from inside a running container)                                 |
@@ -85,6 +86,8 @@ docs/            # On-demand reference docs — read when relevant (see below)
 13. **Never kill the test VM**: `vm.sh stop` powers it down over QMP; killing qemu loses recent writes (ext4 delayed allocation leaves zero-length files, which once looked like a broken factory copy).
 14. **Debugging without a root login**: `VM_EXTRA_UNIT=file.service vm.sh start` injects a unit via SMBIOS credentials; remember systemd expands `%` in `ExecStart` (write `%%`) and `$`-less shell is easier.
 15. **Rootless podman/buildah** need `/etc/subuid` and `/etc/subgid` entries; a sysusers.d account gets none, so the Containerfile seeds them (carried by the factory copy). The sysusers account is `user` (UID 1000).
+
+16. **Opt-in XFS /var** (`inglenook.var=xfs` on the kernel command line, e.g. `KARGS=... images/build.sh`, or `XFS_VAR=1 images/usb.sh`; off by default). In the initrd, `inglenook-var-repart.service` runs `systemd-repart` (definition in `/usr/lib/inglenook/repart.d`, deliberately *not* `/usr/lib/repart.d`: files there make the stock `systemd-repart.service` run in the initrd and fail) before bootc sets up the root, creating an XFS partition (type `var`, label `var`) in all free space after the root, including space past the image end on a bigger disk. `inglenook-var-mount.service` mounts it over the ext4 `/var` bind that `bootc-root-setup` makes at `/sysroot/var`, with `rootcontext=var_t` (a fresh XFS root is unlabeled). It is a *service*, not a `sysroot-var.mount` unit: systemd skips a mount unit for a path that is already mounted. Install the image with `--root-size` (`ROOT_SIZE` for `vm.sh install`) so there is free space. bootc state stays on the ext4 root. Early units that create directories in `/var` themselves race tmpfiles on the empty filesystem and get denied: order them after `systemd-tmpfiles-setup.service` (done for `rpc-statd-notify` and `systemd-random-seed`).
 
 ## Adding New Components
 

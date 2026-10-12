@@ -15,6 +15,15 @@ sudo dd if=build/usb/inglenook.img of=/dev/sdX bs=4M conv=fsync status=progress
 it. The image is 14 GB by default (`TARGET_SIZE=...` to change); the stick must
 be at least that large.
 
+## Variant: all of `/var` on XFS
+
+`XFS_VAR=1 images/usb.sh` builds the stick with the opt-in XFS `/var`: the root
+partition is limited to 8 GB (`ROOT_SIZE=`), and on first boot the initrd creates
+an XFS partition in everything after it, **including the rest of the stick
+beyond the image**, and mounts it as `/var` (podman images, git repositories and
+your home directory live there). Tested in QEMU; not the default for the first
+hardware trial.
+
 ## Before booting
 
 - **Turn Secure Boot off** in the firmware setup. The loader (systemd-boot) and
