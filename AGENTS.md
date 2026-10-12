@@ -1,9 +1,10 @@
 # AGENTS.md — Inglenook Bootc Image Agent Configuration
 
-> **Status: early.** `images/Containerfile` and `images/build.sh` exist; the image
-> builds and boots (composefs backend, systemd-boot, UKI, no GRUB) in QEMU. The
-> rest of the structure and conventions below is still the plan — update this
-> file as the plan becomes reality.
+> **Status: early but working.** The image builds (`images/build.sh`) and boots in
+> QEMU with the composefs backend, systemd-boot and a UKI (no GRUB, no dracut),
+> SELinux enforcing, a clean journal and a wipe-able `/etc` and `/var`;
+> `images/usb.sh` makes a disk image for a USB stick (docs/usb.md). No GUI yet.
+> Update this file as things change.
 
 ## Project Overview
 
@@ -20,7 +21,7 @@ images/
   initrd/        # mkosi config for the initrd (replaces dracut): mkosi.conf + mkosi.extra/
   rootfs/        # Files copied into the image as-is (units, drop-ins, issue banner)
   usb.sh         # Build a raw disk image for a physical machine / USB stick (build/usb)
-  test/          # Rootless QEMU/KVM tests: vm.sh (harness), smoke.sh, wipe.sh; work dir is build/vm
+  test/          # Rootless QEMU/KVM tests: vm.sh (harness), smoke.sh, wipe.sh, xfsvar.sh; work dirs under build/
 docs/            # On-demand reference docs — read when relevant (see below)
 ```
 
@@ -40,9 +41,10 @@ docs/            # On-demand reference docs — read when relevant (see below)
 | Switch image reference   | `bootc switch <ref>` (on the host)                                                |
 | Roll back a deployment   | `bootc rollback` (on the host)                                                    |
 
-> **VM/ISO media**: the ostree-rs-era `bootc image-prepare` verb is *not* part of the
-> current (1.16) CLI. If/when we need to distribute VM or ISO images, that will be an
-> osbuild-based (or equivalent) flow — TBD, and it would live in `images/build.sh`.
+> **Disk images**: the ostree-rs-era `bootc image-prepare` verb is *not* part of the
+> current (1.16) CLI. Raw disk images are made with `bootc install` inside the installer
+> VM of `images/test/vm.sh` (the dev container has no loop devices or root); `images/usb.sh`
+> uses that. ISO/other formats are still TBD (an osbuild-based or equivalent flow).
 
 ## Key Conventions
 
@@ -65,6 +67,7 @@ docs/            # On-demand reference docs — read when relevant (see below)
 - The tag is the git-describe version (`git describe --tags --always --dirty`, leading `v` stripped, falls back to `latest`), so the image ref is `ghcr.io/snugmo/inglenook:<tag>` — e.g. `0.1.0`.
 - Registry defaults to `ghcr.io/snugmo`; `./images/build.sh push` publishes to GitHub Container Registry. For local dev / CI use `DEV_REGISTRY=localhost:5000`.
 - Passes `--build-arg VERSION=<tag>` and `--build-arg REVISION=$(git rev-parse HEAD)` for the `org.opencontainers.image.*` labels in the Containerfile (same convention as cote).
+- Environment: `SSH_PUBKEY` (baked-in login key), `KARGS` (UKI kernel command line), `FEDORA_VERSION`, `DEV_REGISTRY`. The pipeline is `pre` target → mkosi initrd → `base` target → composefs digest → final image with the UKI (see Gotchas 6-8).
 
 ## Gotchas
 
@@ -96,7 +99,11 @@ docs/            # On-demand reference docs — read when relevant (see below)
 
 ## On-Demand Reference Docs
 
-This file holds only the context useful for *any* work in this repo. As the image matures, detailed task-specific playbooks live in `docs/` — read the matching one when doing that kind of work. Planned (to be created when needed):
+This file holds only the context useful for *any* work in this repo. As the image matures, detailed task-specific playbooks live in `docs/` — read the matching one when doing that kind of work.
+
+- **docs/usb.md** — building, writing and trying the USB stick image on a physical machine (logins, what was verified, known limits).
+
+Planned (to be created when needed):
 
 - **docs/bootc.md** — the build/deploy/update flow: image build, `bootc install`, `upgrade`/`switch`/`rollback`, and the `Containerfile` stage architecture.
 - **docs/adding-a-package.md** — how to add a package or binary tool to the image, including checksum verification and layer ordering.
