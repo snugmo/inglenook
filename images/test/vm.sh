@@ -158,11 +158,11 @@ cmd_wait() {
 # loses recent writes: ext4 delayed allocation leaves zero-length files); fall
 # back to killing qemu after 40 s.
 cmd_stop() {
-  if [[ -f qemu.pid ]] && kill -0 "$(cat qemu.pid)" 2>/dev/null; then
+  if [[ -f qemu.pid ]] && kill -0 "$(cat qemu.pid 2>/dev/null)" 2>/dev/null; then
     if [[ -S qmp.sock ]]; then
       printf '{"execute":"qmp_capabilities"}\n{"execute":"system_powerdown"}\n' \
         | socat - UNIX-CONNECT:qmp.sock >/dev/null 2>&1 || true
-      for _ in $(seq 40); do kill -0 "$(cat qemu.pid)" 2>/dev/null || break; sleep 1; done
+      for _ in $(seq 40); do kill -0 "$(cat qemu.pid 2>/dev/null)" 2>/dev/null || break; sleep 1; done
     fi
   fi
   stop_pid qemu.pid
