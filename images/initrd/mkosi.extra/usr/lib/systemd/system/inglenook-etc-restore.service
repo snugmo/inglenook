@@ -1,0 +1,22 @@
+[Unit]
+Description=Restore /etc from the factory copy if it was wiped
+DefaultDependencies=no
+ConditionPathExists=/etc/initrd-release
+# Either no SELinux config, or an empty /etc.
+ConditionPathExists=|!/sysroot/etc/selinux/config
+ConditionDirectoryNotEmpty=|!/sysroot/etc
+After=bootc-root-setup.service
+Before=initrd-root-fs.target
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+# PID 1 loads the SELinux policy from /etc/selinux right after switch-root, and
+# early services (udev, hwdb, journald) read /etc before tmpfiles.d in the real
+# root has run, so the whole of /etc has to be back before then. The rules
+# (C! /etc/<entry>, generated from /usr/share/factory/etc by the Containerfile)
+# live in the image. Files written here are unlabeled, so the preserved runtime
+# directory below is the marker for inglenook-etc-relabel.service.
+RuntimeDirectory=inglenook
+RuntimeDirectoryPreserve=yes
+ExecStart=systemd-tmpfiles --root=/sysroot --create --boot --prefix=/etc
