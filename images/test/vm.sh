@@ -11,7 +11,8 @@
 #   vm.sh wait               wait until ssh works
 #   vm.sh stop               stop the VM
 #
-# Environment: VM_QEMU_EXTRA (start: extra qemu arguments), TARGET_SIZE (install: disk size, default 20G), ESP_FILES (install:
+# Environment: VM_QEMU_EXTRA (start: extra qemu arguments), ROOT_SIZE (install:
+# bootc --root-size, e.g. 12G, leaving the rest of the disk free), TARGET_SIZE (install: disk size, default 20G), ESP_FILES (install:
 # tree copied into the ESP), BOOT_DEVICE=usb (start: attach the disk as a USB
 # stick instead of virtio).
 #
@@ -73,8 +74,9 @@ cmd_prep() {
 cmd_install() {
   local ref=${1:?usage: vm.sh install <image>}
   cmd_stop
-  rm -rf share/result share/inglenook.oci share/esp target.img
+  rm -rf share/result share/inglenook.oci share/esp share/rootsize target.img
   echo "$ref" > share/imgref
+  [[ -n ${ROOT_SIZE:-} ]] && echo "$ROOT_SIZE" > share/rootsize
   # ESP_FILES: a directory tree copied into the ESP after the install (for
   # example loader/credentials/*.cred).
   [[ -n ${ESP_FILES:-} ]] && cp -r "$ESP_FILES" share/esp
