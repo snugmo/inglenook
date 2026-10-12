@@ -59,7 +59,8 @@ RUN sed -i 's/^DEFAULT_HOSTNAME=.*/DEFAULT_HOSTNAME="inglenook"/' /usr/lib/os-re
 # Account & access. Default login account (UID 1000, shared with the cote
 # workspace images), declared with sysusers.d so systemd-sysusers re-creates it
 # at boot if /etc was wiped (no useradd at build time; /etc/passwd is not part
-# of the image's contract). A plain passwd entry is deliberate: a userdb
+# of the image's contract; wheel is declared too, as its only definition is in
+# the /etc/group that a wipe removes). A plain passwd entry is deliberate: a userdb
 # drop-in record was not visible to setuid sudo. The agent pubkey is baked in
 # at build time via --build-arg SSH_PUBKEY=… into a root-owned file under /usr;
 # tmpfiles.d symlinks it as ~/.ssh/authorized_keys. That path is the one place
@@ -69,7 +70,7 @@ RUN sed -i 's/^DEFAULT_HOSTNAME=.*/DEFAULT_HOSTNAME="inglenook"/' /usr/lib/os-re
 # is needed. SSH host keys are generated on first sshd run.
 ARG SSH_PUBKEY=
 RUN mkdir -p /usr/lib/ssh/authorized_keys \
- && printf 'g user 1000\nu user 1000:user "user" /var/home/user /bin/bash\nm user wheel\n' > /usr/lib/sysusers.d/inglenook-user.conf \
+ && printf 'g wheel 10\ng user 1000\nu user 1000:user "user" /var/home/user /bin/bash\nm user wheel\n' > /usr/lib/sysusers.d/inglenook-user.conf \
  && printf '%s\n' "$SSH_PUBKEY" > /usr/lib/ssh/authorized_keys/user \
  && chmod 0644 /usr/lib/ssh/authorized_keys/user \
  && printf 'd /var/home/user 0700 user user -\nd /var/home/user/.ssh 0700 user user -\nL+ /var/home/user/.ssh/authorized_keys - - - - /usr/lib/ssh/authorized_keys/user\n' > /usr/lib/tmpfiles.d/inglenook-user.conf
