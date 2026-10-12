@@ -1,8 +1,9 @@
 # AGENTS.md — Inglenook Bootc Image Agent Configuration
 
-> **Status: pre-build.** Only `images/Containerfile` exists so far. The remaining
-> structure and conventions below are the plan for building the image — update
-> this file as the plan becomes reality.
+> **Status: early.** `images/Containerfile` and `images/build.sh` exist; the image
+> builds and boots (composefs backend, systemd-boot, UKI, no GRUB) in QEMU. The
+> rest of the structure and conventions below is still the plan — update this
+> file as the plan becomes reality.
 
 ## Project Overview
 
@@ -15,7 +16,7 @@ Layout:
 ```
 images/
   Containerfile  # The OS image: Fedora base + packages + host configuration
-  build.sh       # buildah wrapper with registry/tag config (planned)
+  build.sh       # two-pass buildah wrapper: base -> composefs digest -> UKI image
 docs/            # On-demand reference docs — read when relevant (see below)
 ```
 
@@ -23,8 +24,8 @@ docs/            # On-demand reference docs — read when relevant (see below)
 
 | Task                     | Command                                                                          |
 | ------------------------ | -------------------------------------------------------------------------------- |
-| Build bootc OCI image    | `buildah bud -f images/Containerfile -t ghcr.io/snugmo/inglenook:<tag> .` (or `podman build`) |
-| Build + push to ghcr     | `./images/build.sh push` (once `build.sh` exists)                                 |
+| Build bootc OCI image    | `./images/build.sh` (two passes; a plain `buildah build` fails: the `uki` stage needs `COMPOSEFS_DIGEST`) |
+| Build + push to ghcr     | `./images/build.sh push`                                                          |
 | Install image to disk    | `bootc install` (from inside a running container)                                 |
 | Inspect a deployed host  | `bootc status` (on the host)                                                      |
 | Update a deployed host   | `bootc upgrade` (alias `bootc update`, on the host)                               |
@@ -64,6 +65,9 @@ docs/            # On-demand reference docs — read when relevant (see below)
 3. **UID 1000**: the default user is `user` (UID 1000), shared with Snugmo's cote workspace images. Host volume mounts must be writable by UID 1000.
 4. **Update, don't reinstall**: deployed hosts are updated with `bootc upgrade` (or `bootc switch` to change image). Re-running `bootc install` on an already-installed host is not the update path.
 5. **Layer caching**: the bootc stage must stay last; do not reorder instructions above it without understanding the stage architecture.
+
+6. **The UKI embeds the image digest**: the UKI's `composefs=<digest>` must equal the composefs digest of the finished rootfs, so `build.sh` builds the `base` target, computes the digest with `bootc container compute-composefs-digest-from-storage`, then builds the final image with `COMPOSEFS_DIGEST`. Do not use `bootc container ukify --rootfs` in the Containerfile — it measures a mount whose directory mtimes are the layer-extraction time, which never matches what `bootc install` computes. `/boot` is excluded from the digest, so the UKI itself can be added last. Build with layer caching (`--layers`): a rebuilt base has different contents and a different digest; `build.sh` fails if the final image's digest differs.
+7. **`rw` on the UKI command line**: without it `/sysroot` mounts read-only and the `/var` and `/etc` binds inherit that, so `/var` is read-only and services fail.
 
 ## Adding New Components
 
