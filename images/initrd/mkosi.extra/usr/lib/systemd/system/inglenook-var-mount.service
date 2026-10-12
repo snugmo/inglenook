@@ -1,0 +1,17 @@
+[Unit]
+Description=Mount the XFS /var over the state directory bootc binds there
+DefaultDependencies=no
+ConditionKernelCommandLine=inglenook.var=xfs
+ConditionPathExists=/etc/initrd-release
+After=inglenook-var-repart.service bootc-root-setup.service
+Before=initrd-root-fs.target
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+# A service rather than a sysroot-var.mount unit: systemd tracks the bind mount
+# bootc already made at /sysroot/var, and skips a mount unit for that path.
+# rootcontext: a fresh XFS root is unlabeled, which SELinux denies everything
+# in; the kernel resolves the label once PID 1 loads the policy.
+ExecStartPre=udevadm settle
+ExecStart=mount -t xfs -o nosuid,nodev,rootcontext=system_u:object_r:var_t:s0 /dev/disk/by-partlabel/var /sysroot/var
