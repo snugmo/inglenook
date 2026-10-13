@@ -33,6 +33,7 @@ check "selinux mode is $expect_mode" 'getenforce' "$expect_mode"
 check "no journal errors" 'journalctl -b -p err --no-pager -q | grep -avE "virt/tdx" | cut -c1-200 | head -5' ''
 check "no failed units" 'systemctl --failed --no-legend | wc -l' 0
 check "user is in wheel" 'id -nG user | tr " " "\n" | grep -x wheel' wheel
+check "no setuid files" 'find / -xdev -type f -perm -4000 2>/dev/null | head -3' ''
 check "no network interface besides lo" 'ip -br link | grep -vc "^lo"' 0
 check "/var is mounted read-write" 'findmnt -no OPTIONS /var | cut -d, -f1' rw
 check "root is composefs" 'findmnt -no FSTYPE,SOURCE / | cut -d: -f1' 'overlay composefs'
