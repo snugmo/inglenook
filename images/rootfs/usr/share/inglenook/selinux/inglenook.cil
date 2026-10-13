@@ -1,0 +1,15 @@
+; Local SELinux policy for inglenook, installed with `semodule -i` at image build
+; time (see the Containerfile). CIL needs no compiler: add `(allow ...)` lines.
+; To find what is missing, boot with enforcing=0 (the UKI default while the
+; policy is being worked out) and run `ausearch -m avc` as root; denials that a
+; dontaudit rule would hide are logged too because the image's policy is built
+; with `semodule -DB`.
+
+; The per-connection sshd that systemd-ssh-generator starts for ssh-over-vsock
+; accepts a hypervisor-injected key from the ssh.ephemeral-authorized_keys-all
+; credential, which is a file in /run/credentials labeled init_var_run_t.
+; Without this, sshd-session is denied (silently, by a dontaudit rule) and the
+; key is ignored. Found with a permissive sshd_session_t: these three, nothing
+; else. Works for root only: the credential directory is root-only, so sshd,
+; which reads it as the target user, cannot use it for other accounts.
+(allow sshd_session_t init_var_run_t (file (getattr open read)))

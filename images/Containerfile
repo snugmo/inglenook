@@ -81,6 +81,17 @@ RUN mkdir -p /usr/lib/ssh/authorized_keys \
 RUN printf 'user:524288:65536\n' > /etc/subuid \
  && printf 'user:524288:65536\n' > /etc/subgid
 
+# Local SELinux policy. The CIL modules in rootfs/usr/share/inglenook/selinux
+# are installed into the policy store (/etc/selinux, so the factory copy below
+# carries them). SELINUX_NO_DONTAUDIT=1 (the default while the policy is being
+# worked out) rebuilds the policy without dontaudit rules, so that `ausearch -m
+# avc` shows every denial, including the ones the stock policy hides; the
+# process-transition noise (siginh, rlimitinh, noatsecure) comes with it.
+# -n: do not try to load the policy into the build host's kernel.
+ARG SELINUX_NO_DONTAUDIT=1
+RUN semodule -n -i /usr/share/inglenook/selinux/*.cil \
+ && if [ "$SELINUX_NO_DONTAUDIT" = 1 ]; then semodule -n -DB; fi
+
 # Factory /etc. This must be the last thing that touches /etc in this stage.
 # The image must boot with /etc wiped, so a snapshot of the finished /etc goes
 # to /usr/share/factory/etc and tmpfiles.d restores each top-level entry that
