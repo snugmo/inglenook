@@ -81,6 +81,18 @@ RUN dnf -y install --exclude=yama-ptrace-enable \
       ca-certificates gnupg2 gpgme \
  && dnf clean all
 
+# Packages the base ships that this image does not use. There is no GRUB (the
+# loader is systemd-boot from a UKI, bootc installs it itself), so grub2, shim
+# (only grub2-efi-x64 needs it) and bootupd (the GRUB/shim updater) go, with
+# grub2-set-bootflag's setuid bit. sudo goes too: run0 replaces it and the image
+# has no setuid sudo. dnf protects these through config files, which are
+# removed first.
+RUN rm -f /etc/dnf/protected.d/{grub2-efi-x64,grub2-pc,grub2-tools-minimal,shim,sudo}.conf \
+          /usr/share/dnf5/libdnf.conf.d/protect-sudo.conf \
+ && dnf -y remove bootupd grub2-common grub2-efi-x64 grub2-pc grub2-pc-modules \
+      grub2-tools grub2-tools-minimal os-prober shim-x64 sudo \
+ && dnf clean all
+
 # Static files that belong in the image as they are (units, ...): see rootfs/.
 COPY rootfs/ /
 
