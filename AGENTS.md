@@ -99,6 +99,8 @@ docs/            # On-demand reference docs — read when relevant (see below)
 18. **Dev login key**: `images/build.sh` bakes in `dev-keys/authorized_keys` (an unprotected ed25519 key generated on first use; `dev-keys/` is gitignored — never commit a key) unless `SSH_PUBKEY` is set. This is for testing boot and login only; the private half is `dev-keys/id_ed25519`.
 19. **Installing to a drive from a running stick**: see docs/install.md. `bootc image copy-to-storage` + `bootc install to-disk` from `localhost/bootc`. `bootc install` registers no NVRAM boot entry (the fallback `\EFI\BOOT\BOOTX64.EFI` is used; `efibootmgr` can add one), and the password credential on the stick's ESP is not copied.
 
+20. **Wrong or missing labels on the mutable state** (copied-over or restored files; the OS content itself is labeled inside the composefs image): the mutable parts are `/etc`, `/var` and the backing directories under `/sysroot/state` on the root filesystem, which carry ordinary xattr labels. Symptom: AVCs with `unlabeled_t` targets, or with `trawcon="kernel"` for files written before a policy was loaded. Recovery: boot permissive (the UKI default), then `sudo restorecon -R /etc /var` (and `sudo restorecon -R /sysroot/state` if the backing trees themselves look wrong); `touch /.autorelabel` does a full relabel on the next boot. Remember that enforcing mode would turn the same labels into a boot failure.
+
 ## Adding New Components
 
 - **New package/tool**: add it to `images/Containerfile` (respecting layer-cache ordering), rebuild, and verify the bootc labels survived (e.g. `skopeo inspect --config ghcr.io/snugmo/inglenook:<tag> | jq .config.Labels`).
