@@ -93,6 +93,16 @@ RUN rm -f /etc/dnf/protected.d/{grub2-efi-x64,grub2-pc,grub2-tools-minimal,shim,
       grub2-tools grub2-tools-minimal os-prober shim-x64 sudo \
  && dnf clean all
 
+# No setuid binaries. run0 (polkit) replaces sudo, su and pkexec; with
+# polkit-agent-helper.socket enabled the password agent talks to a
+# socket-activated helper, so the setuid helper binary is unused. mount and
+# umount are only used by root; unix_chkpwd, passwd and friends are for local
+# password changes by non-root users, which homed users do with homectl. File
+# capabilities (newuidmap, newgidmap, arping) are not setuid and stay; setgid
+# files are left as they are. smoke.sh fails on any setuid file.
+RUN find /usr -xdev -type f -perm -4000 -exec chmod u-s {} + \
+ && systemctl enable polkit-agent-helper.socket
+
 # Static files that belong in the image as they are (units, ...): see rootfs/.
 COPY rootfs/ /
 
