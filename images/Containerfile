@@ -48,6 +48,22 @@ RUN dnf -y install \
       systemd-boot-unsigned \
  && dnf clean all
 
+# General-purpose command-line tools. attr and acl are in the base already and
+# listed for intent; the rest (shells, editors, archivers, debugging and
+# inspection tools) is not. The base already has util-linux, e2fsprogs,
+# xfsprogs, btrfs-progs, cryptsetup (veritysetup), lvm2, nvme-cli, openssl, jq,
+# curl, 7zip and the basics (sed, findutils, diffutils, procps-ng, iproute,
+# iputils, socat, file, less, nano, xz, zstd, bzip2, gzip, unzip). wget2-wget
+# provides /usr/bin/wget. yama-ptrace-enable (a weak dependency of strace) is
+# excluded: it turns off the kernel's ptrace_scope hardening.
+RUN dnf -y install --exclude=yama-ptrace-enable \
+      attr acl \
+      zsh fish vim-enhanced \
+      bat tree which time patch strace \
+      rsync yq sqlite xxhash \
+      zip lz4 zlib-ng wget2-wget \
+ && dnf clean all
+
 # Static files that belong in the image as they are (units, ...): see rootfs/.
 COPY rootfs/ /
 
