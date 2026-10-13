@@ -53,7 +53,7 @@ RUN dnf -y install \
       # boot, audit and name resolution
       audit efibootmgr nss-mdns systemd-boot-unsigned \
       # time, networking and other systemd components
-      chrony systemd-networkd systemd-oomd-defaults systemd-resolved systemd-sysusers systemd-udev \
+      chrony systemd-networkd systemd-oomd-defaults systemd-resolved systemd-sysusers systemd-udev wireguard-tools \
  && dnf clean all
 
 # General-purpose command-line tools. acl, attr, bind-utils, bubblewrap,
