@@ -44,7 +44,7 @@ RUN mkdir -p /usr/local/sbin \
 RUN dnf -y install \
       podman buildah skopeo git-core \
       openssh-clients yubikey-manager yubico-piv-tool pcsc-lite pcsc-lite-ccid opensc \
-      nss-mdns audit \
+      nss-mdns audit efibootmgr \
       systemd-boot-unsigned \
  && dnf clean all
 
