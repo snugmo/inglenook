@@ -74,7 +74,7 @@ RUN dnf -y install --exclude=yama-ptrace-enable \
       # data and archives
       lz4 sqlite xxhash yq zip zlib-ng \
       # debugging and sandboxing
-      bubblewrap strace time \
+      bubblewrap setools-console strace time \
       # network and file transfer
       bind-utils knot-utils nmap nmap-ncat rsync tcpdump wget2-wget \
       # certificates and encryption
