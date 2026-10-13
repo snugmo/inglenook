@@ -42,7 +42,9 @@ RUN mkdir -p /usr/local/sbin \
 # (container dev environment, ssh and hardware keys). pcsc-lite is for
 # smartcard/PIV YubiKeys (pcscd.socket is preset-enabled), opensc provides the
 # PKCS#11 module ssh uses with PIV. systemd-boot-unsigned is the loader bootc
-# installs (--bootloader systemd).
+# installs (--bootloader systemd). chrony, systemd-resolved, systemd-sysusers and
+# systemd-udev are in the base already and listed for intent; systemd-networkd
+# and systemd-oomd-defaults (the oomd policy defaults) are new.
 RUN dnf -y install \
       # containers and source control
       buildah git-core podman skopeo \
@@ -50,6 +52,8 @@ RUN dnf -y install \
       opensc openssh-clients pcsc-lite pcsc-lite-ccid yubico-piv-tool yubikey-manager \
       # boot, audit and name resolution
       audit efibootmgr nss-mdns systemd-boot-unsigned \
+      # time, networking and other systemd components
+      chrony systemd-networkd systemd-oomd-defaults systemd-resolved systemd-sysusers systemd-udev \
  && dnf clean all
 
 # General-purpose command-line tools. acl, attr, bind-utils, bubblewrap,
