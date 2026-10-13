@@ -1,6 +1,10 @@
 #!/usr/bin/env bash
 # Build a raw disk image that boots on a physical UEFI machine, for writing to
-# a USB stick:
+# a USB stick. By default it is a live installer: the system runs from the
+# stick with /etc and /var in RAM and the stick mounted read-only, and the image
+# to install sits on the stick (/installer/inglenook.oci). See docs/usb.md and
+# docs/install.md. LIVE=0 builds the old persistent stick instead (/etc and /var
+# on the stick, a full system to try things on).
 #
 #   images/usb.sh                   -> build/usb/inglenook.img (+ .zst)
 #   sudo dd if=build/usb/inglenook.img of=/dev/sdX bs=4M conv=fsync status=progress
@@ -22,9 +26,10 @@
 # --with-key=null --name=<name> - <name>.cred`, e.g.
 # ssh.authorized_keys.root or passwd.hashed-password.user.
 #
-# Environment: TARGET_SIZE (default 14G; must fit the stick); XFS_VAR=1 builds the
-# opt-in variant with all of /var on an XFS partition that fills the rest of the
-# stick (ROOT_SIZE, default 8G, is the root partition; see AGENTS.md).
+# Environment: TARGET_SIZE (default 14G; must fit the stick); LIVE=0 for the
+# persistent stick; XFS_VAR=1 (implies LIVE=0) builds the opt-in variant with all
+# of /var on an XFS partition that fills the rest of the stick (ROOT_SIZE,
+# default 8G, is the root partition; see AGENTS.md).
 set -euo pipefail
 
 HERE=$(cd "$(dirname "$0")" && pwd)
@@ -34,6 +39,13 @@ export WORK
 vm=$HERE/test/vm.sh
 
 mkdir -p "$WORK/esp/loader/credentials"
+LIVE=${LIVE:-1}
+[[ ${XFS_VAR:-} == 1 ]] && LIVE=0
+rm -rf "$WORK/esp/loader/addons"
+if [[ $LIVE == 1 ]]; then
+  "$HERE/live-addon.sh" "$WORK/esp"
+  export IMAGE_ON_ROOT=1
+fi
 
 # The login key is dev-keys/authorized_keys (images/build.sh generates it on
 # first use; gitignored).
@@ -68,6 +80,7 @@ cat <<EOF
 
 image:     $WORK/inglenook.img   ($(du -h --apparent-size "$WORK/inglenook.img" | cut -f1); also .zst)
 write:     sudo dd if=$WORK/inglenook.img of=/dev/sdX bs=4M conv=fsync status=progress
+mode:      $([[ $LIVE == 1 ]] && echo "live (RAM state, read-only stick, image in /installer)" || echo "persistent")
 login:     user / $(cat "$WORK/password")   (console)
            ssh -i $REPO/dev-keys/id_ed25519 user@inglenook.local   (or the IP shown on the login screen)
 EOF
