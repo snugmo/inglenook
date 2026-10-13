@@ -38,11 +38,13 @@ VM_QEMU_EXTRA="-drive file=nvme.img,format=raw,if=none,id=nvm -device nvme,drive
 ROOT_SIZE=${ROOT_SIZE:-}   # set for the XFS /var stick, which needs free space
 root_opt=${ROOT_SIZE:+--root-size $ROOT_SIZE}
 sudo_sh() { "$vm" ssh "echo '$pw' | sudo -S -p '' sh -c '$1'"; }
-sudo_sh 'bootc image copy-to-storage'
+# The live stick runs the installer from its own root (podman --rootfs /) and
+# installs from the OCI directory kept on the stick, so nothing is copied into
+# the RAM-backed /var first.
 sudo_sh "podman run --rm --privileged --pid=host --security-opt label=type:unconfined_t \\
-  -v /dev:/dev -v /var/lib/containers:/var/lib/containers localhost/bootc \\
+  -v /dev:/dev -v /sysroot/installer:/installer:ro --rootfs /:O \\
   bootc install to-disk --composefs-backend --bootloader systemd --filesystem ext4 \\
-  $root_opt --wipe /dev/nvme0n1"
+  --source-imgref oci:/installer/inglenook:latest $root_opt --wipe /dev/nvme0n1"
 "$vm" ssh 'lsblk -no NAME,SIZE,FSTYPE,PARTLABEL /dev/nvme0n1'
 # Carry the stick's credentials (the console password) over to the new ESP, which
 # the install does not copy; then show what ended up on it.

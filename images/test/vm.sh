@@ -76,9 +76,14 @@ cmd_prep() {
 cmd_install() {
   local ref=${1:?usage: vm.sh install <image>}
   cmd_stop
-  rm -rf share/result share/inglenook.oci share/esp share/rootsize target.img
+  rm -rf share/result share/inglenook.oci share/esp share/rootsize share/imageonroot target.img
   echo "$ref" > share/imgref
   [[ -n ${ROOT_SIZE:-} ]] && echo "$ROOT_SIZE" > share/rootsize
+  # IMAGE_ON_ROOT: also leave the image, as an OCI layout directory, on the
+  # root partition (/installer/inglenook, tag latest), for a live stick to
+  # install from. A directory, not an archive: containers/image extracts an
+  # oci-archive into temp space (the live /var is RAM) before it can read it.
+  [[ -n ${IMAGE_ON_ROOT:-} ]] && touch share/imageonroot
   # ESP_FILES: a directory tree copied into the ESP after the install (for
   # example loader/credentials/*.cred).
   [[ -n ${ESP_FILES:-} ]] && cp -r "$ESP_FILES" share/esp
