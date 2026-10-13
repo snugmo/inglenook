@@ -35,8 +35,8 @@ vm=$HERE/test/vm.sh
 
 mkdir -p "$WORK/esp/loader/credentials"
 
-[[ -f $WORK/key.pub ]] || ssh-keygen -q -t ed25519 -N '' -C inglenook-usb -f "$WORK/key"
-
+# The login key is dev-keys/authorized_keys (images/build.sh generates it on
+# first use; gitignored).
 if [[ ! -f $WORK/password ]]; then
   head -c 64 /dev/urandom | base64 | tr -dc 'A-Za-z0-9' | head -c 16 > "$WORK/password"
   chmod 600 "$WORK/password"
@@ -54,7 +54,7 @@ if [[ ${XFS_VAR:-} == 1 ]]; then
   kargs+=" inglenook.var=xfs"
   ROOT_SIZE=${ROOT_SIZE:-8G}
 fi
-ref=$(SSH_PUBKEY=$(cat "$WORK/key.pub") KARGS="$kargs" \
+ref=$(KARGS="$kargs" \
         "$REPO/images/build.sh" | tee /dev/stderr | sed -n 's/^built //p')
 
 "$vm" prep
@@ -69,5 +69,5 @@ cat <<EOF
 image:     $WORK/inglenook.img   ($(du -h --apparent-size "$WORK/inglenook.img" | cut -f1); also .zst)
 write:     sudo dd if=$WORK/inglenook.img of=/dev/sdX bs=4M conv=fsync status=progress
 login:     user / $(cat "$WORK/password")   (console)
-           ssh -i $WORK/key user@inglenook.local   (or the IP shown on the login screen)
+           ssh -i $REPO/dev-keys/id_ed25519 user@inglenook.local   (or the IP shown on the login screen)
 EOF
