@@ -78,7 +78,7 @@ echo -n "$(openssl passwd -6)" | systemd-creds encrypt --with-key=null \
 ```
 
 The live stick's console logs in as root without a password (the drop-ins for
-`getty@tty1` and `serial-getty@` are only put in place on live boots), so you can
+`kmsconvt@tty1` (the tty1 console is kmscon), `getty@tty1` and `serial-getty@` are only put in place on live boots), so you can
 set a password for the account that gets installed, or provision it, before
 installing. There is no `sudo` in the image and no setuid file: over ssh,
 `run0` asks for the `user` password through polkit (a tty is needed: `ssh -t`).

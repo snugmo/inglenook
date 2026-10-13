@@ -52,7 +52,12 @@ check "root is read-only" 'findmnt -no OPTIONS / | cut -d, -f1' ro
 check "the stick's root partition is read-only" 'findmnt -rno OPTIONS /sysroot | cut -d, -f1' ro
 check "the stick's ESP is read-only" 'findmnt -rno OPTIONS -t vfat /boot | cut -d, -f1' ro
 check "selinux mode is $expect_mode" 'getenforce' "$expect_mode"
-check "the console is logged in as root (autologin)" 'loginctl list-sessions --no-legend | awk "\$3==\"root\" && \$6 ~ /^user/ " | wc -l' 1
+check "the serial console is logged in as root (autologin)" 'loginctl list-sessions --no-legend | awk "\$3==\"root\" && \$7==\"ttyS0\"" | wc -l' 1
+# On hardware logind starts kmsconvt@tty1 (the VT console) by itself; the VM has
+# no display, so start it by hand and check that it logs root in on the seat.
+SSH_USER=root "$vm" ssh 'systemctl start kmsconvt@tty1.service' || fail=1
+sleep 3
+check "the tty1 console (kmscon) logs in as root" 'loginctl list-sessions --no-legend | awk "\$3==\"root\" && \$4==\"seat0\"" | wc -l' 1
 check "user is in wheel" 'id -nG user | tr " " "\n" | grep -x wheel' wheel
 check "no failed units" 'systemctl --failed --no-legend | wc -l' 0
 "$vm" new-avc || fail=1
