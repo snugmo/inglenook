@@ -170,6 +170,11 @@ cmd_new_avc() {
 }
 
 cmd_wait() {
+  # Let the boot reach the (serial) login prompt before probing ssh: until
+  # systemd-user-sessions removes /run/nologin, pam_nologin refuses logins and
+  # sshd logs each refused probe as an error, which the journal checks would
+  # then flag.
+  for _ in $(seq 120); do grep -aq 'login: ' target.log 2>/dev/null && break; sleep 1; done
   for _ in $(seq 60); do cmd_ssh true 2>/dev/null && return; sleep 3; done
   echo "timed out waiting for ssh; see $WORK/target.log" >&2
   return 1
