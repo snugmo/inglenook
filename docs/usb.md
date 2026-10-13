@@ -1,9 +1,10 @@
-# Trying inglenook on a physical machine (USB stick)
+# The inglenook USB stick (live installer)
 
-`images/usb.sh` builds `build/usb/inglenook.img`, a raw disk image of the
-current tree, installed exactly like a real deployment
-(`bootc install --composefs-backend --bootloader systemd --generic-image`).
-Write it to a stick, boot the machine from it.
+`images/usb.sh` builds `build/usb/inglenook.img`, a raw disk image of the current
+tree. Booted from a USB stick it is a **live system**, in the spirit of the
+Fedora CoreOS live ISO: it runs from the stick without keeping anything, and its
+job is to give you a shell to install inglenook to the machine's drive
+([install.md](install.md)).
 
 ```sh
 images/usb.sh                       # ~10 min; prints the login details at the end
@@ -15,24 +16,39 @@ sudo dd if=build/usb/inglenook.img of=/dev/sdX bs=4M conv=fsync status=progress
 it. The image is 14 GB by default (`TARGET_SIZE=...` to change); the stick must
 be at least that large.
 
-## Variant: all of `/var` on XFS
+## What "live" means here
 
-`XFS_VAR=1 images/usb.sh` builds the stick with the opt-in XFS `/var`: the root
-partition is limited to 8 GB (`ROOT_SIZE=`), and on first boot the initrd creates
-an XFS partition in everything after it, **including the rest of the stick
-beyond the image**, and mounts it as `/var` (podman images, git repositories and
-your home directory live there). Tested in QEMU; not the default for the first
-hardware trial.
+- `/etc` and `/var` are in RAM and gone at power-off. The stick's root partition
+  is mounted read-only and not even checked at boot; the ESP is mounted
+  read-only. Nothing the system or you do is written to the stick. (The one
+  exception is the boot loader: systemd-boot keeps its own entropy files
+  `\loader\random-seed` and `\loader\boot-secret-mixin` on the ESP.)
+- The live `/var` is a 3 GiB filesystem backed by up to half of the RAM, so
+  the machine needs enough memory: the install itself works with 4 GB in QEMU.
+- The OS image to install is on the stick, as an OCI directory in
+  `/installer/inglenook` on the root partition (`/sysroot/installer/inglenook`
+  when booted). It is a copy of exactly the image the stick runs. No network and
+  no registry are needed to install.
+- Nothing of "live" is in the image itself. The stick differs from an installed
+  system only by `loader/addons/live.addon.efi` on its ESP (see AGENTS.md,
+  gotcha 21), which adds `ro fsck.mode=skip inglenook.live=1` to the kernel
+  command line. The addon is not copied by the install, so the installed system
+  is persistent.
+
+`LIVE=0 images/usb.sh` builds the other kind of stick instead: a full persistent
+system (state on the stick, a root partition that keeps the image size) to try
+things on a machine, with no installer image on it. `XFS_VAR=1` is about the
+system that gets *installed* (see [install.md](install.md#a-persistent-var-partition)).
 
 ## Before booting
 
-- **Turn Secure Boot off** in the firmware setup. The loader (systemd-boot) and
-  the UKI are unsigned. Signing is on the to-do list.
+- **Turn Secure Boot off** in the firmware setup. The loader (systemd-boot), the
+  UKI and the live addon are unsigned. Signing is on the to-do list.
 - Boot from the stick through the firmware's one-time boot menu (usually F12 or
   F8/F10/Esc). The loader sits on the removable-media path
   `\EFI\BOOT\BOOTX64.EFI`, so any UEFI machine finds it.
-- The machine needs the wired network for ssh (DHCP via NetworkManager). There
-  is no GUI yet: you get a text console on the monitor.
+- The machine needs the wired network only for ssh (DHCP via NetworkManager).
+  There is no GUI yet: you get a text console on the monitor.
 
 ## Logging in
 
@@ -47,8 +63,9 @@ unprotected test key made for this trial, not for real use.
 
 The password is a systemd credential on the stick's EFI partition
 (`\loader\credentials\passwd.hashed-password.user.cred`) that `systemd-sysusers`
-applies when it creates `user` on first boot. The ssh public key is baked into
-the image at `/usr/lib/ssh/authorized_keys/user`.
+applies when it creates `user` on every boot (the account is made fresh each
+time, because `/etc` is). The ssh public key is baked into the image at
+`/usr/lib/ssh/authorized_keys/user`.
 
 To use your own key instead: put your public key in `dev-keys/authorized_keys`
 (and delete `build/usb/password` for a new password) and rerun `images/usb.sh`. Or leave the image and
@@ -60,31 +77,37 @@ echo -n "$(openssl passwd -6)" | systemd-creds encrypt --with-key=null \
 # copy it to <ESP>/loader/credentials/
 ```
 
-The password only takes effect on the first boot, when the account is created.
-
 `sudo` asks for a password, so the console password doubles as the sudo
 password. (Passwordless sudo is a decision still open.)
 
 ## What was verified (in QEMU, not on hardware)
 
-The image was booted as a USB mass-storage device behind an xHCI controller
-with a wired (DHCP) NIC, SELinux permissive (see below), and checked for: no failed units, no
-AVC denials, no journal errors; ssh key login; console/ssh password login from
-the ESP credential and `sudo` with it; rootless podman pulling and running an
-image; `pcscd` reachable over ssh with a virtual CCID reader (so `ykman`,
-`yubico-piv-tool` and OpenSC can talk to it; wheel members are allowed by a
-polkit rule); hostname `inglenook`. Not testable here: a real YubiKey, the
-Intel iGPU/NIC drivers, your firmware's boot menu.
+`images/test/live.sh`: the stick image booted as a USB mass-storage device with
+the live addon: `/etc` and `/var` on the RAM filesystems, root and ESP
+read-only, the root partition byte-identical after the boot, no failed units,
+no journal errors, no SELinux denials beyond the baseline.
+`images/test/nvme-install.sh`: the full flow of [install.md](install.md) from
+that stick onto a blank virtual NVMe drive with 4 GB of RAM, then a boot from
+the NVMe alone. Earlier, on a persistent stick: ssh key login, console/ssh
+password login from the ESP credential and `sudo` with it, rootless podman
+pulling and running an image, `pcscd` reachable over ssh with a virtual CCID
+reader (so `ykman`, `yubico-piv-tool` and OpenSC can talk to it; wheel members
+are allowed by a polkit rule), hostname `inglenook`.
+
+Not testable here: a real YubiKey, the Intel iGPU/NIC drivers, your firmware's
+boot menu. On hardware the persistent stick booted to the login prompt; the live
+stick has not been tried there yet.
 
 ## What to try
 
+- Install it: [install.md](install.md).
 - `podman run --rm -it registry.fedoraproject.org/fedora echo hi` (rootless
-  podman; `buildah`, `skopeo` and `git` are installed too).
+  podman; `buildah`, `skopeo` and `git` are installed too). Pulled images go
+  to the RAM `/var`.
 - A YubiKey: `ykman info`, `ykman piv info` (`pcscd` starts on demand through
   its socket), `ssh-keygen -D /usr/lib64/pkcs11/opensc-pkcs11.so` for PIV keys.
   If `ykman` cannot see the key, note the output of `lsusb`, `opensc-tool -l`
   and `journalctl -b | grep -i -E 'pcsc|yubi|udev|avc'`.
-- Reboot and check `bootc status`.
 
 ## Known limits
 
@@ -92,13 +115,8 @@ Intel iGPU/NIC drivers, your firmware's boot menu.
   rules, so `sudo ausearch -m avc` after booting lists every denial the strict
   policy would have caused: that is the list to bring back. (Or use
   `enforcing=1` in a rebuilt UKI: `SELINUX_ENFORCING=1 images/usb.sh`.)
-- Installing to the internal drive: [install.md](install.md).
 - Secure Boot unsigned; no TPM binding; no disk encryption.
-- The root partition keeps the image size: the first-boot grow service only runs
-  in VMs. The rest of the stick stays unused for now (it is where the XFS `/var`
-  partition will go).
-- `/var` lives on the root partition, i.e. on the stick, so expect USB speeds
-  for podman image pulls.
 - No GUI, no sound, no wifi tooling beyond what the base ships.
 - If `/etc` and `/var` are wiped, the initrd restores `/etc` from its factory copy and
-  labels it; the system comes back by itself (`images/test/wipe.sh`).
+  labels it; the system comes back by itself (`images/test/wipe.sh`). A live boot
+  is the same thing with the wipe built in.
