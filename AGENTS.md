@@ -2,7 +2,8 @@
 
 > **Status: early but working.** The image builds (`images/build.sh`) and boots in
 > QEMU with the composefs backend, systemd-boot and a UKI (no GRUB, no dracut),
-> SELinux enforcing, a clean journal and a wipe-able `/etc` and `/var`;
+> SELinux permissive (while the policy is worked out), a clean journal and a
+> wipe-able `/etc` and `/var`;
 > `images/usb.sh` makes a disk image for a USB stick (docs/usb.md). No GUI yet.
 > Update this file as things change.
 
@@ -33,6 +34,8 @@ docs/            # On-demand reference docs — read when relevant (see below)
 | Build + push to ghcr     | `./images/build.sh push`                                                          |
 | Stateless-boot test      | `./images/test/wipe.sh` (after smoke.sh: wipes /etc and /var, boots twice, checks SELinux and the journal) |
 | XFS /var variant test    | `./images/test/xfsvar.sh` (builds with `inglenook.var=xfs`, installs with `--root-size`, grows the disk, checks the XFS /var) |
+| Install-to-NVMe flow test | `./images/test/nvme-install.sh` (stick as USB + blank virtual NVMe; the documented install; boot from the NVMe) |
+| SELinux denials of a boot | `images/test/vm.sh avc` (summary) / `new-avc` (not in the baseline); on the machine: `sudo ausearch -m avc` |
 | Build a USB stick image  | `./images/usb.sh` then `dd` build/usb/inglenook.img to the stick (see the script header) |
 | Smoke-test the image     | `./images/test/smoke.sh` (build, install, boot over vsock, check; needs KVM, OVMF, vhost-device-vsock) |
 | Install image to disk    | `bootc install` (from inside a running container)                                 |
@@ -92,6 +95,10 @@ docs/            # On-demand reference docs — read when relevant (see below)
 
 16. **Opt-in XFS /var** (`inglenook.var=xfs` on the kernel command line, e.g. `KARGS=... images/build.sh`, or `XFS_VAR=1 images/usb.sh`; off by default). In the initrd, `inglenook-var-repart.service` runs `systemd-repart` (definition in `/usr/lib/inglenook/repart.d`, deliberately *not* `/usr/lib/repart.d`: files there make the stock `systemd-repart.service` run in the initrd and fail) before bootc sets up the root, creating an XFS partition (type `var`, label `var`) in all free space after the root, including space past the image end on a bigger disk. `inglenook-var-mount.service` mounts it over the ext4 `/var` bind that `bootc-root-setup` makes at `/sysroot/var`, with `rootcontext=var_t` (a fresh XFS root is unlabeled). It is a *service*, not a `sysroot-var.mount` unit: systemd skips a mount unit for a path that is already mounted. Install the image with `--root-size` (`ROOT_SIZE` for `vm.sh install`) so there is free space. bootc state stays on the ext4 root. Early units that create directories in `/var` themselves race tmpfiles on the empty filesystem and get denied: order them after `systemd-tmpfiles-setup.service` (done for `rpc-statd-notify` and `systemd-random-seed`).
 
+17. **SELinux is permissive on purpose, with dontaudit off**: the UKI carries `enforcing=0` (`SELINUX_ENFORCING=0`; 1 restores enforcing) and the image's policy is built with `semodule -DB` (`SELINUX_NO_DONTAUDIT=1`), so one boot logs every denial the strict policy would produce, including those a `dontaudit` rule hides (there is no kernel switch for that; it is compiled into the policy). Local policy is CIL (`images/rootfs/usr/share/inglenook/selinux/*.cil`, installed with `semodule -n -i` at build; no compiler needed). To find the rules a domain needs: boot, `ausearch -m avc` as root (or `vm.sh avc`), add `(allow ...)` lines. The tests fail only on denials missing from `images/test/selinux-denials.baseline` (plus `...xfsvar.baseline` for the XFS variant): the baseline is the to-do list, shrink it as rules or upstream fixes land. Process-transition perms (siginh, rlimitinh, noatsecure) are ignored as dontaudit noise. The one rule so far lets `sshd_session_t` read the `ssh.ephemeral-authorized_keys-all` credential (`init_var_run_t`), which works for root only: the credential directory is root-only and sshd reads authorized_keys as the target user.
+18. **Dev login key**: `images/build.sh` bakes in `dev-keys/authorized_keys` (an unprotected ed25519 key generated on first use; `dev-keys/` is gitignored — never commit a key) unless `SSH_PUBKEY` is set. This is for testing boot and login only; the private half is `dev-keys/id_ed25519`.
+19. **Installing to a drive from a running stick**: see docs/install.md. `bootc image copy-to-storage` + `bootc install to-disk` from `localhost/bootc`. `bootc install` registers no NVRAM boot entry (the fallback `\EFI\BOOT\BOOTX64.EFI` is used; `efibootmgr` can add one), and the password credential on the stick's ESP is not copied.
+
 ## Adding New Components
 
 - **New package/tool**: add it to `images/Containerfile` (respecting layer-cache ordering), rebuild, and verify the bootc labels survived (e.g. `skopeo inspect --config ghcr.io/snugmo/inglenook:<tag> | jq .config.Labels`).
@@ -102,6 +109,7 @@ docs/            # On-demand reference docs — read when relevant (see below)
 This file holds only the context useful for *any* work in this repo. As the image matures, detailed task-specific playbooks live in `docs/` — read the matching one when doing that kind of work.
 
 - **docs/usb.md** — building, writing and trying the USB stick image on a physical machine (logins, what was verified, known limits).
+- **docs/install.md** — installing to the internal drive from the stick (partitioning, ESP, composefs, persistent XFS `/var`).
 
 Planned (to be created when needed):
 
