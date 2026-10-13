@@ -36,35 +36,43 @@ LABEL org.opencontainers.image.title="inglenook" \
 RUN mkdir -p /usr/local/sbin \
  && sed -i '/^z \/ 555 /d' /usr/lib/tmpfiles.d/root.conf
 
-# Packages. podman, skopeo and openssh-clients are already in the base; they are
-# listed so the image states its intent (container dev environment, ssh and
-# hardware keys). pcsc-lite is for smartcard/PIV YubiKeys (pcscd.socket is
-# preset-enabled), opensc provides the PKCS#11 module ssh uses with PIV.
-# systemd-boot-unsigned is the loader bootc installs (--bootloader systemd).
+# Packages, in two layers (core first, tools after it) with one commented line
+# per group, sorted by name within the group. podman, skopeo and openssh-clients
+# are already in the base; they are listed so the image states its intent
+# (container dev environment, ssh and hardware keys). pcsc-lite is for
+# smartcard/PIV YubiKeys (pcscd.socket is preset-enabled), opensc provides the
+# PKCS#11 module ssh uses with PIV. systemd-boot-unsigned is the loader bootc
+# installs (--bootloader systemd).
 RUN dnf -y install \
-      podman buildah skopeo git-core \
-      openssh-clients yubikey-manager yubico-piv-tool pcsc-lite pcsc-lite-ccid opensc \
-      nss-mdns audit efibootmgr \
-      systemd-boot-unsigned \
+      # containers and source control
+      buildah git-core podman skopeo \
+      # ssh and hardware keys
+      opensc openssh-clients pcsc-lite pcsc-lite-ccid yubico-piv-tool yubikey-manager \
+      # boot, audit and name resolution
+      audit efibootmgr nss-mdns systemd-boot-unsigned \
  && dnf clean all
 
-# General-purpose command-line tools. attr, acl, ca-certificates, gnupg2,
-# gpgme, bind-utils, bubblewrap and gawk are in the base already and listed for
-# intent; the rest (shells, editors, multiplexers, archivers, debugging and
-# network inspection tools) is not. The base already has util-linux, e2fsprogs,
-# xfsprogs, btrfs-progs, cryptsetup (veritysetup), lvm2, nvme-cli, openssl, jq,
-# curl, 7zip and the basics (sed, findutils, diffutils, procps-ng, iproute,
-# iputils, socat, file, less, nano, xz, zstd, bzip2, gzip, unzip). wget2-wget
-# provides /usr/bin/wget. yama-ptrace-enable (a weak dependency of strace) is
-# excluded: it turns off the kernel's ptrace_scope hardening.
+# General-purpose command-line tools. acl, attr, bind-utils, bubblewrap,
+# ca-certificates, gawk, gnupg2 and gpgme are in the base already and listed for
+# intent. The base also has util-linux, e2fsprogs, xfsprogs, btrfs-progs,
+# cryptsetup (veritysetup), lvm2, nvme-cli, openssl, jq, curl, 7zip and the
+# basics (sed, findutils, diffutils, procps-ng, iproute, iputils, socat, file,
+# less, nano, xz, zstd, bzip2, gzip, unzip). wget2-wget provides /usr/bin/wget.
+# yama-ptrace-enable (a weak dependency of strace) is excluded: it turns off the
+# kernel's ptrace_scope hardening.
 RUN dnf -y install --exclude=yama-ptrace-enable \
-      attr acl \
-      zsh fish vim-enhanced xxd tmux screen \
-      bat tree which time patch strace ripgrep gawk \
-      rsync yq sqlite xxhash \
-      zip lz4 zlib-ng wget2-wget \
-      ca-certificates gnupg2 gpgme bubblewrap \
-      bind-utils knot-utils nmap nmap-ncat tcpdump \
+      # shells, editors and terminal multiplexers
+      fish screen tmux vim-enhanced xxd zsh \
+      # text and file utilities
+      acl attr bat gawk patch ripgrep tree which \
+      # data and archives
+      lz4 sqlite xxhash yq zip zlib-ng \
+      # debugging and sandboxing
+      bubblewrap strace time \
+      # network and file transfer
+      bind-utils knot-utils nmap nmap-ncat rsync tcpdump wget2-wget \
+      # certificates and encryption
+      ca-certificates gnupg2 gpgme \
  && dnf clean all
 
 # Static files that belong in the image as they are (units, ...): see rootfs/.
