@@ -162,7 +162,8 @@ cmd_avc() {
 # UKI is permissive and dontaudit rules are off); a test fails only on new ones.
 cmd_new_avc() {
   local new
-  new=$(cmd_avc | comm -13 "$HERE/selinux-denials.baseline" -)
+  # AVC_BASELINE_EXTRA: more known denials for a variant (a space-separated list of files).
+  new=$(cmd_avc | comm -13 <(sort -u "$HERE/selinux-denials.baseline" ${AVC_BASELINE_EXTRA:-}) -)
   if [[ -z $new ]]; then echo "ok   no new selinux denials"; else
     echo "FAIL new selinux denials (not in selinux-denials.baseline):"; echo "$new" | sed 's/^/       /'; return 1
   fi
