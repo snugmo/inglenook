@@ -27,9 +27,11 @@
 # ssh.authorized_keys.root or passwd.hashed-password.user.
 #
 # Environment: TARGET_SIZE (default 14G; must fit the stick); LIVE=0 for the
-# persistent stick; XFS_VAR=1 (implies LIVE=0) builds the opt-in variant with all
-# of /var on an XFS partition that fills the rest of the stick (ROOT_SIZE,
-# default 8G, is the root partition; see AGENTS.md).
+# persistent stick; XFS_VAR=1 builds the opt-in variant with all of /var on an
+# XFS partition that fills the rest of the drive: on a live stick that is the
+# system it installs (install with --root-size, see docs/install.md); with LIVE=0
+# the stick itself gets it (ROOT_SIZE, default 8G, is its root partition; see
+# AGENTS.md).
 set -euo pipefail
 
 HERE=$(cd "$(dirname "$0")" && pwd)
@@ -40,7 +42,6 @@ vm=$HERE/test/vm.sh
 
 mkdir -p "$WORK/esp/loader/credentials"
 LIVE=${LIVE:-1}
-[[ ${XFS_VAR:-} == 1 ]] && LIVE=0
 rm -rf "$WORK/esp/loader/addons"
 if [[ $LIVE == 1 ]]; then
   "$HERE/live-addon.sh" "$WORK/esp"
@@ -64,7 +65,7 @@ openssl passwd -6 -stdin < "$WORK/password" | tr -d '\n' \
 kargs="rw console=ttyS0,115200n8 console=tty0"
 if [[ ${XFS_VAR:-} == 1 ]]; then
   kargs+=" inglenook.var=xfs"
-  ROOT_SIZE=${ROOT_SIZE:-8G}
+  [[ $LIVE == 1 ]] || ROOT_SIZE=${ROOT_SIZE:-8G}
 fi
 ref=$(KARGS="$kargs" \
         "$REPO/images/build.sh" | tee /dev/stderr | sed -n 's/^built //p')

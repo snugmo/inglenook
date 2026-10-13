@@ -2,6 +2,9 @@
 Description=Mount the XFS /var over the state directory bootc binds there
 DefaultDependencies=no
 ConditionKernelCommandLine=inglenook.var=xfs
+# Not on a live stick, whose /var is RAM and whose disk must stay untouched; the
+# flag in the UKI is for the system the stick installs.
+ConditionKernelCommandLine=!inglenook.live
 ConditionPathExists=/etc/initrd-release
 After=inglenook-var-repart.service bootc-root-setup.service
 Before=initrd-root-fs.target

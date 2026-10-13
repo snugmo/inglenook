@@ -2,6 +2,9 @@
 Description=Create the XFS /var partition in the free space after the root
 DefaultDependencies=no
 ConditionKernelCommandLine=inglenook.var=xfs
+# Not on a live stick, whose /var is RAM and whose disk must stay untouched; the
+# flag in the UKI is for the system the stick installs.
+ConditionKernelCommandLine=!inglenook.live
 ConditionPathExists=/etc/initrd-release
 After=sysroot.mount
 Requires=sysroot.mount
