@@ -19,3 +19,11 @@
 ; Seen when creating LUKS and directory homes on Fedora 45 (selinux-policy
 ; 45.20); harmless to allow.
 (allow systemd_homework_t pidfs_t (filesystem (getattr)))
+
+; run0 authenticates through polkit-agent-helper, which runs as a
+; socket-activated service (polkit-agent-helper.socket) instead of a setuid
+; binary. The agent hands it the caller's pty, so the helper and the
+; unix_chkpwd it runs inherit that terminal. Found by running run0 from an ssh
+; session with a pty.
+(allow policykit_auth_t user_devpts_t (chr_file (getattr)))
+(allow chkpwd_t user_devpts_t (chr_file (read write)))
