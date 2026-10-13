@@ -1,10 +1,12 @@
 checkpoint_restore | getty_t -> getty_t : capability2
+dac_override | systemd_hwdb_t -> systemd_hwdb_t : capability
 dac_override | systemd_oomd_t -> systemd_oomd_t : capability
 getattr | systemd_homed_t -> init_t : file
 ioctl | systemd_homed_t -> init_t : file
 net_admin | gssproxy_t -> gssproxy_t : capability
 net_admin | kmscon_t -> kmscon_t : capability
 net_admin | system_dbusd_t -> system_dbusd_t : capability
+net_admin | systemd_hwdb_t -> systemd_hwdb_t : capability
 net_admin | systemd_modules_load_t -> systemd_modules_load_t : capability
 net_admin | systemd_network_generator_t -> systemd_network_generator_t : capability
 net_admin | systemd_ssh_issue_t -> systemd_ssh_issue_t : capability
