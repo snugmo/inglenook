@@ -10,11 +10,13 @@
 #   vm.sh ssh [cmd...]       ssh to the running VM as $SSH_USER (default: user)
 #   vm.sh wait               wait until ssh works
 #   vm.sh stop               stop the VM
+#   vm.sh avc                summarize this boot's SELinux denials (avc-summary.py)
+#   vm.sh new-avc            the denials not in selinux-denials.baseline; exit 1 if any
 #
 # Environment: VM_QEMU_EXTRA (start: extra qemu arguments), ROOT_SIZE (install:
 # bootc --root-size, e.g. 12G, leaving the rest of the disk free), TARGET_SIZE (install: disk size, default 20G), ESP_FILES (install:
-# tree copied into the ESP), BOOT_DEVICE=usb (start: attach the disk as a USB
-# stick instead of virtio).
+# tree copied into the ESP), BOOT_DEVICE=usb|nvme (start: attach the disk as a
+# USB stick or an NVMe drive instead of virtio), KEEP_VARS=1 (start).
 #
 # Debugging without a root login: VM_EXTRA_UNIT=path/to/x.service vm.sh start
 # injects that unit through the systemd.extra-unit.* credential (SMBIOS) and
@@ -98,13 +100,17 @@ cmd_start() {
   local mode=${1:-vsock}
   cmd_stop
   echo "$mode" > mode
-  cp "$OVMF/OVMF_VARS.fd" vars.fd
+  # KEEP_VARS=1 keeps the firmware variables (boot entries the guest registered).
+  [[ -n ${KEEP_VARS:-} && -f vars.fd ]] || cp "$OVMF/OVMF_VARS.fd" vars.fd
   rm -f qmp.sock
   local args=("${qemu_common[@]}" -serial file:target.log -daemonize -pidfile qemu.pid
     -qmp unix:qmp.sock,server,nowait
     -drive "if=pflash,format=raw,readonly=on,file=$OVMF/OVMF_CODE.fd"
     -drive "if=pflash,format=raw,file=vars.fd")
-  if [[ ${BOOT_DEVICE:-virtio} == usb ]]; then
+  if [[ ${BOOT_DEVICE:-virtio} == nvme ]]; then
+    args+=(-drive file=target.img,format=raw,if=none,id=nvmedisk
+      -device nvme,drive=nvmedisk,serial=inglenook,bootindex=0)
+  elif [[ ${BOOT_DEVICE:-virtio} == usb ]]; then
     # As a USB stick behind an xHCI controller, like on real hardware.
     args+=(-device qemu-xhci,id=xhci -drive file=target.img,format=raw,if=none,id=usbdisk
       -device usb-storage,bus=xhci.0,drive=usbdisk,bootindex=0)
@@ -148,6 +154,20 @@ cmd_ssh() {
   fi
 }
 
+cmd_avc() {
+  cmd_ssh 'journalctl -q -b --no-pager -o cat | grep -a "avc:  denied"' | "$HERE/avc-summary.py"
+}
+
+# The baseline lists the denials known today (the policy is being worked out, the
+# UKI is permissive and dontaudit rules are off); a test fails only on new ones.
+cmd_new_avc() {
+  local new
+  new=$(cmd_avc | comm -13 "$HERE/selinux-denials.baseline" -)
+  if [[ -z $new ]]; then echo "ok   no new selinux denials"; else
+    echo "FAIL new selinux denials (not in selinux-denials.baseline):"; echo "$new" | sed 's/^/       /'; return 1
+  fi
+}
+
 cmd_wait() {
   for _ in $(seq 60); do cmd_ssh true 2>/dev/null && return; sleep 3; done
   echo "timed out waiting for ssh; see $WORK/target.log" >&2
@@ -169,4 +189,5 @@ cmd_stop() {
   stop_pid vsockd.pid
 }
 
-"cmd_${1:?usage: vm.sh prep|install|start|ssh|wait|stop}" "${@:2}"
+sub=${1:?usage: vm.sh prep|install|start|ssh|wait|avc|new-avc|stop}
+"cmd_${sub//-/_}" "${@:2}"

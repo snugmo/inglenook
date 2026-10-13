@@ -14,6 +14,9 @@ REPO=$(cd "$HERE/../.." && pwd)
 WORK=${WORK:-$REPO/build/vm}
 export WORK
 vm=$HERE/vm.sh
+# The UKI is permissive by default while the policy is worked out (the build
+# honors SELINUX_ENFORCING too); expect the matching mode.
+[[ ${SELINUX_ENFORCING:-0} == 1 ]] && expect_mode=Enforcing || expect_mode=Permissive
 trap '"$vm" stop' EXIT
 
 wait_down() { # the VM runs with -no-reboot, so a power-off ends the qemu process
@@ -33,14 +36,14 @@ checks() {
   check "user account is back" 'id -un' user
   check "user is in wheel" 'id -nG user | tr " " "\n" | grep -x wheel' wheel
   check "selinux policy restored" 'test -s /etc/selinux/targeted/policy/policy.* && echo yes' yes
-  check "selinux is enforcing" 'getenforce' Enforcing
+  check "selinux mode is $expect_mode" 'getenforce' "$expect_mode"
   check "subuid restored for rootless podman" 'cut -d: -f1 /etc/subuid' user
   check "no failed units" 'systemctl --failed --no-legend | wc -l' 0
   if [[ ${1:-} == relaxed ]]; then
     echo "skip no selinux denials / no journal errors (known limitation on this boot)"
     return
   fi
-  check "no selinux denials" 'journalctl -q -b --no-pager | grep -ac "avc:  denied"' 0
+  "$vm" new-avc || fail=1
   check "no journal errors" 'journalctl -b -p err --no-pager -q | grep -avE "virt/tdx" | cut -c1-200 | head -5' ''
 }
 

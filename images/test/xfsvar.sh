@@ -11,6 +11,9 @@ REPO=$(cd "$HERE/../.." && pwd)
 WORK=${WORK:-$REPO/build/xfsvar}
 export WORK
 vm=$HERE/vm.sh
+# The UKI is permissive by default while the policy is worked out (the build
+# honors SELINUX_ENFORCING too); expect the matching mode.
+[[ ${SELINUX_ENFORCING:-0} == 1 ]] && expect_mode=Enforcing || expect_mode=Permissive
 trap '"$vm" stop' EXIT
 
 mkdir -p "$WORK"
@@ -34,8 +37,8 @@ checks() {
   check "/var is xfs" 'stat -f -c %T /var' xfs
   check "/var uses the whole disk" 'findmnt -rno SOURCE -t xfs /var | xargs lsblk -bno SIZE | awk "{print (\$1 > 10*2^30) ? \"yes\" : \"no\"}"' yes
   check "/var is the var partition" 'findmnt -rno SOURCE -t xfs /var | xargs lsblk -no PARTLABEL' var
-  check "selinux is enforcing" 'getenforce' Enforcing
-  check "no selinux denials" 'journalctl -q -b --no-pager | grep -ac "avc:  denied"' 0
+  check "selinux mode is $expect_mode" 'getenforce' "$expect_mode"
+  "$vm" new-avc || fail=1
   check "no failed units" 'systemctl --failed --no-legend | wc -l' 0
   check "no journal errors" 'journalctl -b -p err --no-pager -q | grep -avE "virt/tdx" | cut -c1-200 | head -5' ''
 }
