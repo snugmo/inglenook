@@ -31,3 +31,7 @@
 ; The live stick's console autologin (agetty --autologin root, login -f): the
 ; PAM account check runs unix_chkpwd, which inherits the console tty.
 (allow chkpwd_t tty_device_t (chr_file (read write)))
+
+; The same for the live autologin through kmscon (the tty1 console): unix_chkpwd
+; inherits kmscon's pty.
+(allow chkpwd_t kmscon_devpts_t (chr_file (read write)))

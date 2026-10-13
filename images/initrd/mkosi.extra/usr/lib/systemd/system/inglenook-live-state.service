@@ -37,4 +37,4 @@ ExecStart=mount -o loop,discard,nosuid,nodev,rootcontext=system_u:object_r:var_t
 ExecStart=mkdir -p /run/systemd/system
 ExecStart=cp -r /usr/lib/inglenook/live/boot.mount.d /run/systemd/system/
 # Live only: the console logs in as root (see the drop-ins).
-ExecStart=cp -r /usr/lib/inglenook/live/getty@tty1.service.d /usr/lib/inglenook/live/serial-getty@.service.d /run/systemd/system/
+ExecStart=cp -r /usr/lib/inglenook/live/getty@tty1.service.d /usr/lib/inglenook/live/kmsconvt@tty1.service.d /usr/lib/inglenook/live/serial-getty@.service.d /run/systemd/system/
