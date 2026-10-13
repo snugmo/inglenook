@@ -22,6 +22,10 @@ trap '"$vm" stop' EXIT
 mkdir -p "$WORK"
 # vm.sh ssh uses $WORK/key; the stick has dev-keys/authorized_keys baked in.
 cp "$REPO/dev-keys/id_ed25519" "$WORK/key"; chmod 600 "$WORK/key"
+# The image has no sudo: vm.sh also injects this key for root (SMBIOS credential),
+# and the documented commands run as root over ssh (on the console the live
+# stick logs in as root by itself).
+ssh-keygen -y -f "$WORK/key" > "$WORK/key.pub"
 cp --sparse=always "$STICK" "$WORK/stick.img"
 rm -f "$WORK/nvme.img"; truncate -s "${NVME_SIZE:-24G}" "$WORK/nvme.img"
 pw=$(cat "$PASSWORD_FILE")
@@ -33,22 +37,21 @@ VM_QEMU_EXTRA="-drive file=nvme.img,format=raw,if=none,id=nvm -device nvme,drive
 "$vm" wait
 "$vm" ssh 'lsblk -dno NAME,SIZE,TRAN,MODEL | grep -E "^(nvme|sd)"'
 
-# The commands from docs/install.md, run as root through sudo (-S reads the
-# password from stdin, so the script itself comes in via -c).
+# The commands from docs/install.md, run as root.
 ROOT_SIZE=${ROOT_SIZE:-}   # set for the XFS /var stick, which needs free space
 root_opt=${ROOT_SIZE:+--root-size $ROOT_SIZE}
-sudo_sh() { "$vm" ssh "echo '$pw' | sudo -S -p '' sh -c '$1'"; }
+root_sh() { SSH_USER=root "$vm" ssh "sh -c '$1'"; }
 # The live stick runs the installer from its own root (podman --rootfs /) and
 # installs from the OCI directory kept on the stick, so nothing is copied into
 # the RAM-backed /var first.
-sudo_sh "podman run --rm --privileged --pid=host --security-opt label=type:unconfined_t \\
+root_sh "podman run --rm --privileged --pid=host --security-opt label=type:unconfined_t \\
   -v /dev:/dev -v /sysroot/installer:/installer:ro --rootfs /:O \\
   bootc install to-disk --composefs-backend --bootloader systemd --filesystem ext4 \\
   --source-imgref oci:/installer/inglenook:latest $root_opt --wipe /dev/nvme0n1"
 "$vm" ssh 'lsblk -no NAME,SIZE,FSTYPE,PARTLABEL /dev/nvme0n1'
 # Carry the stick's credentials (the console password) over to the new ESP, which
 # the install does not copy; then show what ended up on it.
-sudo_sh 'mount /dev/nvme0n1p2 /mnt && cp -r /boot/loader/credentials /mnt/loader/ && umount /mnt'
+root_sh 'mount /dev/nvme0n1p2 /mnt && cp -r /boot/loader/credentials /mnt/loader/ && umount /mnt'
 "$vm" stop
 
 echo "boot 2: from the NVMe drive alone"
@@ -69,9 +72,14 @@ check "no failed units" 'systemctl --failed --no-legend | wc -l' 0
 check "no journal errors" 'journalctl -b -p err --no-pager -q | grep -avE "virt/tdx" | cut -c1-200 | head -5' ''
 # The install registers no NVRAM entry (the firmware boots the fallback path); the
 # documented efibootmgr step adds one.
-sudo_sh 'efibootmgr -c -d /dev/nvme0n1 -p 2 -L inglenook -l \\EFI\\systemd\\systemd-bootx64.efi >/dev/null'
+root_sh 'efibootmgr -c -d /dev/nvme0n1 -p 2 -L inglenook -l \\EFI\\systemd\\systemd-bootx64.efi >/dev/null'
 check "firmware boot entry added with efibootmgr" 'efibootmgr | grep -cE "^Boot[0-9A-F]+\* inglenook\s"' 1
-check "console password was applied from the carried-over credential" "echo '$pw' | sudo -S -p '' true && echo ok" ok
+# The carried-over credential must have set the stick's password hash for `user`.
+hash=$(root_sh 'grep ^user: /etc/shadow | cut -d: -f2')
+salt=$(cut -d'$' -f3 <<<"$hash")
+if [[ -n $salt && $hash == "$(openssl passwd -6 -salt "$salt" -stdin <<<"$pw")" ]]; then
+  echo "ok   console password was applied from the carried-over credential"
+else echo "FAIL console password was not applied"; fail=1; fi
 if [[ -n $ROOT_SIZE ]]; then
   check "/var is xfs on the same drive" 'stat -f -c %T /var' xfs
   check "/var is the var partition" 'findmnt -rno SOURCE -t xfs /var | xargs lsblk -no PARTLABEL' var
