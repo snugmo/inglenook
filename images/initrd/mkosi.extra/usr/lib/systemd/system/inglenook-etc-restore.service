@@ -15,8 +15,11 @@ RemainAfterExit=yes
 # early services (udev, hwdb, journald) read /etc before tmpfiles.d in the real
 # root has run, so the whole of /etc has to be back before then. The rules
 # (C! /etc/<entry>, generated from /usr/share/factory/etc by the Containerfile)
-# live in the image. Files written here are unlabeled, so the preserved runtime
-# directory below is the marker for inglenook-etc-relabel.service.
-RuntimeDirectory=inglenook
-RuntimeDirectoryPreserve=yes
+# live in the image. Files written here are unlabeled until setfiles labels them.
 ExecStart=systemd-tmpfiles --root=/sysroot --create --boot --prefix=/etc
+# Label the restored files from the policy and file contexts in the target tree:
+# -r strips the /sysroot prefix so paths match as /etc/..., -c validates the
+# contexts against that policy file rather than the (not yet loaded) kernel
+# policy, -m keeps setfiles from skipping mounts that do not show seclabel yet,
+# which is probably what made an earlier plain `setfiles` a silent no-op here.
+ExecStart=sh -c 'setfiles -m -F -r /sysroot -c /sysroot/etc/selinux/targeted/policy/policy.* /sysroot/etc/selinux/targeted/contexts/files/file_contexts /sysroot/etc'
