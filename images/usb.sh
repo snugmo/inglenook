@@ -76,6 +76,7 @@ ESP_FILES=$WORK/esp TARGET_SIZE=${TARGET_SIZE:-14G} ROOT_SIZE=${ROOT_SIZE:-} "$v
 rm -f "$WORK/inglenook.img"
 mv "$WORK/target.img" "$WORK/inglenook.img"
 zstd -T0 -q -f "$WORK/inglenook.img" -o "$WORK/inglenook.img.zst"
+(cd "$WORK" && sha256sum inglenook.img inglenook.img.zst > SHA256SUMS)
 
 cat <<EOF
 
