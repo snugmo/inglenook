@@ -29,9 +29,6 @@ check() { # description command-run-in-guest expected-output
   local got; got=$("$vm" ssh "$2" 2>&1 || true)
   if [[ $got == "$3" ]]; then echo "ok   $1"; else echo "FAIL $1: got '$got', want '$3'"; fail=1; fi
 }
-# checks [relaxed]: on the first boot after a wipe, the restored /etc is
-# unlabeled while PID 1 does its first-boot work, so the AVC and journal-error
-# checks are skipped there (known limitation, see AGENTS.md); boot 3 is strict.
 checks() {
   check "user account is back" 'id -un' user
   check "user is in wheel" 'id -nG user | tr " " "\n" | grep -x wheel' wheel
@@ -39,10 +36,6 @@ checks() {
   check "selinux mode is $expect_mode" 'getenforce' "$expect_mode"
   check "subuid restored for rootless podman" 'cut -d: -f1 /etc/subuid' user
   check "no failed units" 'systemctl --failed --no-legend | wc -l' 0
-  if [[ ${1:-} == relaxed ]]; then
-    echo "skip no selinux denials / no journal errors (known limitation on this boot)"
-    return
-  fi
   "$vm" new-avc || fail=1
   check "no journal errors" 'journalctl -b -p err --no-pager -q | grep -avE "virt/tdx" | cut -c1-200 | head -5' ''
 }
@@ -54,7 +47,7 @@ wait_down
 echo "boot 2: first boot with an empty /etc and /var"
 "$vm" start vsock
 "$vm" wait
-checks relaxed
+checks
 "$vm" stop
 
 echo "boot 3: ordinary boot after the restore"
