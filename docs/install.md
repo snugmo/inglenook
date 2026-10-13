@@ -3,7 +3,7 @@
 From the USB stick (see [usb.md](usb.md)) you can install the same OS onto the
 machine's NVMe drive. This is plain `bootc install`; nothing here is specific to
 the stick. The whole flow is tested in QEMU by `images/test/nvme-install.sh`
-(stick as a USB device, blank virtual NVMe drive, then boot from the NVMe alone).
+(live stick as a USB device, blank virtual NVMe drive, then boot from the NVMe alone).
 
 **This erases the target drive.** Check the device name twice.
 
@@ -17,20 +17,19 @@ lsblk -o NAME,SIZE,MODEL,TRAN,MOUNTPOINT      # the stick is TRAN=usb; the targe
 
 ## 2. Install
 
-`bootc install` runs from inside a container of the image to be installed. The
-running system *is* that image, so first copy it into podman's storage, where it
-shows up as `localhost/bootc`; then run the installer from it with access to the
-host's devices:
+`bootc install` normally runs from inside a container of the image to be
+installed. The live stick avoids copying that image anywhere: it runs the
+installer from its own root filesystem (`podman run --rootfs /`) and gives it the
+OCI copy of the image that is kept on the stick (`/sysroot/installer/inglenook`,
+read-only). Nothing is written to the stick or to the RAM-backed `/var` first:
 
 ```sh
-sudo bootc image copy-to-storage
-
 sudo podman run --rm --privileged --pid=host \
     --security-opt label=type:unconfined_t \
-    -v /dev:/dev -v /var/lib/containers:/var/lib/containers \
-    localhost/bootc \
+    -v /dev:/dev -v /sysroot/installer:/installer:ro --rootfs /:O \
     bootc install to-disk --composefs-backend --bootloader systemd \
-        --filesystem ext4 --wipe /dev/nvme0n1
+        --filesystem ext4 --source-imgref oci:/installer/inglenook:latest \
+        --wipe /dev/nvme0n1
 ```
 
 That single command does everything you listed:
@@ -43,7 +42,8 @@ That single command does everything you listed:
 
 The kernel command line (including `composefs=<digest>`, `rw`, `enforcing=0` and
 the hostname) lives inside the UKI, so the installed system boots exactly like
-the stick does.
+the stick does, except that it is not live: the live addon sits only on the
+stick's ESP and is not copied, so `/etc` and `/var` persist on the new drive.
 
 When it prints `Installation complete!` two optional steps remain, both while the
 stick is still running:
@@ -51,7 +51,7 @@ stick is still running:
 ```sh
 # a. carry over the console password: it is a credential on the *stick's* ESP,
 #    which the install does not copy, and the new system sets the password when
-#    it creates `user` on its first boot
+#    it creates `user` on its first boot (/boot is the stick's ESP, read-only)
 sudo mount /dev/nvme0n1p2 /mnt
 sudo cp -r /boot/loader/credentials /mnt/loader/
 sudo umount /mnt
@@ -69,19 +69,22 @@ image.
 
 ## A persistent `/var` partition
 
-By default `/var` is a directory on the root filesystem, so it is persistent
-already, just not on its own partition. For all of `/var` on its own XFS
-partition use the XFS variant of the stick:
+By default `/var` of the installed system is a directory on the root filesystem,
+so it is persistent already, just not on its own partition. For all of `/var` on
+its own XFS partition build the stick with the XFS flag:
 
 ```sh
 XFS_VAR=1 WORK=$PWD/build/usb-xfs images/usb.sh      # on the build machine; write that image to the stick
 ```
 
-and install with a limited root so there is free space left on the drive:
+The image gets the `inglenook.var=xfs` flag in its UKI, so the installed system
+creates the partition; the live stick skips that (its `/var` is RAM). Install
+with a limited root so there is free space left on the drive:
 
 ```sh
 ... bootc install to-disk --composefs-backend --bootloader systemd \
-        --filesystem ext4 --root-size 64G --wipe /dev/nvme0n1
+        --filesystem ext4 --source-imgref oci:/installer/inglenook:latest \
+        --root-size 64G --wipe /dev/nvme0n1
 ```
 
 On first boot the initrd creates the XFS partition in everything after the root
@@ -92,10 +95,10 @@ on a different filesystem later by hand is possible but not what is tested.
 ## Afterwards
 
 - `bootc status` shows the booted deployment. The image reference recorded at
-  install time is `localhost/bootc`, which nobody can update from. Once the image
-  is published, add `--target-imgref ghcr.io/snugmo/inglenook:<tag>` to the
-  install command (or run `bootc switch` later) so that `bootc upgrade` has
-  somewhere to pull from.
+  install time comes from the stick's OCI directory, which nobody can update
+  from. Once the image is published, add
+  `--target-imgref ghcr.io/snugmo/inglenook:<tag>` to the install command (or
+  run `bootc switch` later) so that `bootc upgrade` has somewhere to pull from.
 - Other layouts (keeping existing partitions, dual boot, LUKS) need
   `bootc install to-filesystem` on a filesystem you prepared yourself; that path
   is not tested here.
