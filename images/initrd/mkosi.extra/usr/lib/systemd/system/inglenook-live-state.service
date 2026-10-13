@@ -1,0 +1,38 @@
+[Unit]
+Description=Live boot: keep /etc and /var in RAM so the stick is never written
+DefaultDependencies=no
+ConditionKernelCommandLine=inglenook.live
+ConditionPathExists=/etc/initrd-release
+After=bootc-root-setup.service
+# Before the /etc restore: it sees the empty /sysroot/etc and fills it from the
+# factory copy, exactly as after a wipe (images/test/wipe.sh).
+Before=inglenook-etc-restore.service initrd-root-fs.target
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+# The state lives on two small ext4 filesystems in image files on a tmpfs, not
+# on tmpfs directly: tmpfs files are labeled from SELinux transition rules and
+# ignore the security.selinux xattr, so the labels the /etc restore sets in the
+# initrd would be lost, while ext4 keeps them like the persistent state does.
+# The tmpfs only fills as the filesystems do, and `discard` hands freed blocks
+# back to it. /run survives the switch-root and
+# takes the mounts below it along; the loop devices stay attached.
+# The mounts go over the state directories bootc-root-setup bound at /sysroot/etc
+# and /sysroot/var, hiding (and never touching) what the stick holds there. The
+# mounts are made before PID 1 has loaded the SELinux policy, so their roots get
+# an explicit label, as with the XFS /var.
+ExecStart=modprobe loop
+ExecStart=mkdir -p /run/inglenook-live
+ExecStart=mount -t tmpfs -o size=50%%,mode=0700 tmpfs /run/inglenook-live
+ExecStart=truncate -s 256M /run/inglenook-live/etc.img
+ExecStart=truncate -s 3G /run/inglenook-live/var.img
+ExecStart=mkfs.ext4 -q -L live-etc -O ^has_journal /run/inglenook-live/etc.img
+ExecStart=mkfs.ext4 -q -L live-var -O ^has_journal -E lazy_itable_init=1,nodiscard /run/inglenook-live/var.img
+ExecStart=mount -o loop,discard,nodev,rootcontext=system_u:object_r:etc_t:s0 /run/inglenook-live/etc.img /sysroot/etc
+ExecStart=mount -o loop,discard,nosuid,nodev,rootcontext=system_u:object_r:var_t:s0 /run/inglenook-live/var.img /sysroot/var
+# The ESP is mounted on first access by the gpt-auto automount, read-write by
+# default, and even that dirties a FAT volume. A drop-in in /run (which the real
+# root inherits) makes it read-only for live boots only.
+ExecStart=mkdir -p /run/systemd/system
+ExecStart=cp -r /usr/lib/inglenook/live/boot.mount.d /run/systemd/system/

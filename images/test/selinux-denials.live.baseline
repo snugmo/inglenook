@@ -1,0 +1,13 @@
+add_name | syslogd_t -> unlabeled_t : dir
+create | syslogd_t -> unlabeled_t : dir
+create | syslogd_t -> unlabeled_t : file
+getattr | syslogd_t -> unlabeled_t : dir
+getattr | syslogd_t -> unlabeled_t : file
+map | syslogd_t -> unlabeled_t : file
+open read write | syslogd_t -> unlabeled_t : file
+open read | syslogd_t -> unlabeled_t : dir
+read | syslogd_t -> unlabeled_t : dir
+search | syslogd_t -> unlabeled_t : dir
+setattr | syslogd_t -> unlabeled_t : file
+write | syslogd_t -> unlabeled_t : dir
+write | syslogd_t -> unlabeled_t : file
