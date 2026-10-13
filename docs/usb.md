@@ -100,6 +100,5 @@ Intel iGPU/NIC drivers, your firmware's boot menu.
 - `/var` lives on the root partition, i.e. on the stick, so expect USB speeds
   for podman image pulls.
 - No GUI, no sound, no wifi tooling beyond what the base ships.
-- If `/etc` and `/var` are wiped, the system restores `/etc` from its factory copy,
-  but the first boot afterwards is noisy (unlabeled files for a moment);
-  ordinary boots are clean. See AGENTS.md.
+- If `/etc` and `/var` are wiped, the initrd restores `/etc` from its factory copy and
+  labels it; the system comes back by itself (`images/test/wipe.sh`).
