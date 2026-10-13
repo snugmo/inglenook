@@ -58,7 +58,7 @@ unprotected test key made for this trial, not for real use.
 
 | What | Where |
 | --- | --- |
-| console login | user `user`, password in `build/usb/password` |
+| console login | live stick: logged in as root automatically (no password). Installed system: user `user`, password in `build/usb/password` |
 | ssh | `ssh -i dev-keys/id_ed25519 user@inglenook.local` (copy that private key to your workstation), or `user@<ip>`; the console login screen shows the IPv4/IPv6 addresses (press Enter to refresh them) |
 
 The password is a systemd credential on the stick's EFI partition
@@ -77,8 +77,11 @@ echo -n "$(openssl passwd -6)" | systemd-creds encrypt --with-key=null \
 # copy it to <ESP>/loader/credentials/
 ```
 
-`sudo` asks for a password, so the console password doubles as the sudo
-password. (Passwordless sudo is a decision still open.)
+The live stick's console logs in as root without a password (the drop-ins for
+`getty@tty1` and `serial-getty@` are only put in place on live boots), so you can
+set a password for the account that gets installed, or provision it, before
+installing. There is no `sudo` in the image and no setuid file: over ssh,
+`run0` asks for the `user` password through polkit (a tty is needed: `ssh -t`).
 
 ## What was verified (in QEMU, not on hardware)
 
@@ -89,7 +92,7 @@ no journal errors, no SELinux denials beyond the baseline.
 `images/test/nvme-install.sh`: the full flow of [install.md](install.md) from
 that stick onto a blank virtual NVMe drive with 4 GB of RAM, then a boot from
 the NVMe alone. Earlier, on a persistent stick: ssh key login, console/ssh
-password login from the ESP credential and `sudo` with it, rootless podman
+password login from the ESP credential, rootless podman
 pulling and running an image, `pcscd` reachable over ssh with a virtual CCID
 reader (so `ykman`, `yubico-piv-tool` and OpenSC can talk to it; wheel members
 are allowed by a polkit rule), hostname `inglenook`.
@@ -112,7 +115,7 @@ stick has not been tried there yet.
 ## Known limits
 
 - **SELinux is permissive** on purpose, and the policy is built without `dontaudit`
-  rules, so `sudo ausearch -m avc` after booting lists every denial the strict
+  rules, so `ausearch -m avc` as root after booting lists every denial the strict
   policy would have caused: that is the list to bring back. (Or use
   `enforcing=1` in a rebuilt UKI: `SELINUX_ENFORCING=1 images/usb.sh`.)
 - Secure Boot unsigned; no TPM binding; no disk encryption.

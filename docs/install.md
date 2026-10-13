@@ -9,7 +9,9 @@ the stick. The whole flow is tested in QEMU by `images/test/nvme-install.sh`
 
 ## 1. Boot the stick and log in
 
-Console or `ssh user@inglenook.local` (see usb.md). Identify the internal drive:
+The live stick logs in as root on the console by itself (no password; the
+installed system does not). Over the network use `ssh user@inglenook.local` (see
+usb.md) and `run0` for root. Identify the internal drive:
 
 ```sh
 lsblk -o NAME,SIZE,MODEL,TRAN,MOUNTPOINT      # the stick is TRAN=usb; the target is e.g. nvme0n1
@@ -24,7 +26,7 @@ OCI copy of the image that is kept on the stick (`/sysroot/installer/inglenook`,
 read-only). Nothing is written to the stick or to the RAM-backed `/var` first:
 
 ```sh
-sudo podman run --rm --privileged --pid=host \
+podman run --rm --privileged --pid=host \
     --security-opt label=type:unconfined_t \
     -v /dev:/dev -v /sysroot/installer:/installer:ro --rootfs /:O \
     bootc install to-disk --composefs-backend --bootloader systemd \
@@ -52,17 +54,17 @@ stick is still running:
 # a. carry over the console password: it is a credential on the *stick's* ESP,
 #    which the install does not copy, and the new system sets the password when
 #    it creates `user` on its first boot (/boot is the stick's ESP, read-only)
-sudo mount /dev/nvme0n1p2 /mnt
-sudo cp -r /boot/loader/credentials /mnt/loader/
-sudo umount /mnt
+mount /dev/nvme0n1p2 /mnt
+cp -r /boot/loader/credentials /mnt/loader/
+umount /mnt
 
 # b. register a firmware boot entry (the install does not; the firmware finds the
 #    fallback loader by itself and most machines then offer the drive as a boot
 #    device, but an explicit entry is more predictable)
-sudo efibootmgr -c -d /dev/nvme0n1 -p 2 -L inglenook -l '\EFI\systemd\systemd-bootx64.efi'
+efibootmgr -c -d /dev/nvme0n1 -p 2 -L inglenook -l '\EFI\systemd\systemd-bootx64.efi'
 ```
 
-Then `sudo poweroff`, remove the stick and boot the machine; it comes up from the
+Then `poweroff`, remove the stick and boot the machine; it comes up from the
 NVMe drive (use the firmware boot menu if it still prefers the stick). The
 installed system has the same logins as the stick: the ssh key is baked into the
 image.
