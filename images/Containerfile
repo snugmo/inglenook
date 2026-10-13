@@ -63,6 +63,8 @@ RUN dnf -y install \
 RUN dnf -y install --exclude=yama-ptrace-enable \
       # shells, editors and terminal multiplexers
       fish screen tmux vim-enhanced xxd zsh \
+      # source control (the full git on top of git-core, for the extra tools)
+      git \
       # text and file utilities
       acl attr bat gawk patch ripgrep tree which \
       # data and archives
