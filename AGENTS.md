@@ -37,6 +37,7 @@ docs/            # On-demand reference docs — read when relevant (see below)
 | Stateless-boot test      | `./images/test/wipe.sh` (after smoke.sh: wipes /etc and /var, boots twice, checks SELinux and the journal) |
 | XFS /var variant test    | `./images/test/xfsvar.sh` (builds with `inglenook.var=xfs`, installs with `--root-size`, grows the disk, checks the XFS /var) |
 | Live-stick test          | `./images/test/live.sh` (live addon on the ESP; /etc and /var in RAM; nothing written to the stick) |
+| Hardware-token login test | `./images/test/token.sh` (software FIDO2 token in the VM: homed users, run0's polkit stack, pam-u2f, ssh; see docs/tokens.md) |
 | Install-to-NVMe flow test | `./images/test/nvme-install.sh` (live stick as USB + blank virtual NVMe; the documented install; boot from the NVMe) |
 | SELinux denials of a boot | `images/test/vm.sh avc` (summary) / `new-avc` (not in the baseline); on the machine: `ausearch -m avc` as root |
 | Build a USB stick image  | `./images/usb.sh` (live installer; `LIVE=0` for a persistent stick) then `dd` build/usb/inglenook.img to the stick (see the script header) |
@@ -107,6 +108,8 @@ docs/            # On-demand reference docs — read when relevant (see below)
 
 22. **No setuid files**: the Containerfile strips the setuid bit from everything in `/usr` (sudo, GRUB, shim and bootupd are removed too) and `smoke.sh` fails on any setuid file. Privilege escalation is `run0` (polkit authorizes, wheel is admin). The password agent needs `polkit-agent-helper.socket` enabled: without it the agent execs `polkit-agent-helper-1`, which refuses to run unless setuid. File capabilities (`newuidmap`, `newgidmap`, `arping`) are kept for rootless podman. `run0` needs a tty to ask for the password (`ssh -t`), and `user` needs a password for it; in the test VM inject one with `VM_EXTRA_UNIT` (a oneshot running `chpasswd`).
 
+23. **Token logins** (docs/tokens.md): authselect has `with-systemd-homed` (set in the Containerfile, so `pam_systemd_home` is in `system-auth`), `pam-u2f` is installed but `with-pam-u2f` is off, and `sshd_config.d/20-systemd-homed.conf` reads keys from homed records. Never add `AuthenticationMethods publickey,password` to sshd (locks out root and token-only users). A homed user's ssh login needs the token in the *server*. `images/test/token.sh` drives `softfido.py`, a small software CTAP2 authenticator over uhid; it checks the wiring, not real YubiKeys. Pitfalls: `homectl create` always asks for a password (remove it afterwards with `images/test/token/nopw.sh`), `$PIN` is ignored (answer the ask-password queue), and `pkill -f` matches your own ssh command line.
+
 ## Adding New Components
 
 - **New package/tool**: add it to `images/Containerfile` (respecting layer-cache ordering), rebuild, and verify the bootc labels survived (e.g. `skopeo inspect --config ghcr.io/snugmo/inglenook:<tag> | jq .config.Labels`).
@@ -117,6 +120,7 @@ docs/            # On-demand reference docs — read when relevant (see below)
 This file holds only the context useful for *any* work in this repo. As the image matures, detailed task-specific playbooks live in `docs/` — read the matching one when doing that kind of work.
 
 - **docs/usb.md** — building, writing and trying the USB stick image on a physical machine (logins, what was verified, known limits).
+- **docs/tokens.md** — hardware-token logins: homed + FIDO2/PKCS#11, pam-u2f, what was tested with the software token and the limits.
 - **docs/install.md** — installing to the internal drive from the stick (partitioning, ESP, composefs, persistent XFS `/var`).
 
 Planned (to be created when needed):
