@@ -1,0 +1,2 @@
+net_admin | systemd_passwd_agent_t -> systemd_passwd_agent_t : capability
+sendto | init_t -> unconfined_t : unix_dgram_socket
