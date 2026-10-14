@@ -41,7 +41,9 @@ RUN mkdir -p /usr/local/sbin \
 # are already in the base; they are listed so the image states its intent
 # (container dev environment, ssh and hardware keys). pcsc-lite is for
 # smartcard/PIV YubiKeys (pcscd.socket is preset-enabled), opensc provides the
-# PKCS#11 module ssh uses with PIV. systemd-boot-unsigned is the loader bootc
+# PKCS#11 module ssh uses with PIV. pam-u2f (with pamu2fcfg to register a key)
+# is the PAM module for FIDO2 keys on plain accounts; homed's own FIDO2 support
+# needs no package. systemd-boot-unsigned is the loader bootc
 # installs (--bootloader systemd). chrony, systemd-resolved, systemd-sysusers and
 # systemd-udev are in the base already and listed for intent; systemd-networkd
 # and systemd-oomd-defaults (the oomd policy defaults) are new.
@@ -49,7 +51,7 @@ RUN dnf -y install \
       # containers and source control
       buildah git-core podman skopeo \
       # ssh and hardware keys
-      opensc openssh-clients pcsc-lite pcsc-lite-ccid yubico-piv-tool yubikey-manager \
+      opensc openssh-clients pam-u2f pamu2fcfg pcsc-lite pcsc-lite-ccid yubico-piv-tool yubikey-manager \
       # boot, audit and name resolution
       audit efibootmgr nss-mdns systemd-boot-unsigned \
       # time, networking and other systemd components
@@ -128,6 +130,13 @@ RUN mkdir -p /usr/lib/ssh/authorized_keys \
  && printf '%s\n' "$SSH_PUBKEY" > /usr/lib/ssh/authorized_keys/user \
  && chmod 0644 /usr/lib/ssh/authorized_keys/user \
  && printf 'd /var/home/user 0700 user user -\nd /var/home/user/.ssh 0700 user user -\nL+ /var/home/user/.ssh/authorized_keys - - - - /usr/lib/ssh/authorized_keys/user\n' > /usr/lib/tmpfiles.d/inglenook-user.conf
+
+# PAM: put pam_systemd_home into the authselect profile (the features the base
+# image selected stay), so homed users can log in on the console, with run0 and
+# over ssh. This is /etc (authselect links /etc/pam.d), carried by the factory
+# copy below. pam-u2f is installed but its feature (with-pam-u2f) stays off:
+# turning it on makes every plain account need a key mapping.
+RUN authselect select $(authselect current --raw) with-systemd-homed --force
 
 # Rootless podman/buildah need subordinate id ranges for `user`; a sysusers.d
 # account does not get any (useradd would add them). The ranges only need to
