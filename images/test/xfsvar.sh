@@ -24,7 +24,7 @@ mkdir -p "$WORK"
 "$vm" prep
 ref=$(SSH_PUBKEY=$(cat "$WORK/key.pub") KARGS="rw console=tty0 console=ttyS0,115200n8 inglenook.var=xfs" \
         "$REPO/images/build.sh" | tee /dev/stderr | sed -n 's/^built //p')
-ROOT_SIZE=${ROOT_SIZE:-8G} TARGET_SIZE=${TARGET_SIZE:-14G} "$vm" install "$ref"
+TPM=1 BLOCK_SETUP=tpm2-luks ROOT_SIZE=${ROOT_SIZE:-8G} TARGET_SIZE=${TARGET_SIZE:-14G} "$vm" install "$ref"
 # A real stick is larger than the image: the partition must also use the space
 # after the image's end (repart moves the backup GPT header).
 truncate -s "${DISK_SIZE:-20G}" "$WORK/target.img"
@@ -38,14 +38,18 @@ checks() {
   # stat -f: the filesystem of /var, not the mount stack (bootc's ext4 bind is under it)
   check "/var is xfs" 'stat -f -c %T /var' xfs
   check "/var uses the whole disk" 'findmnt -rno SOURCE -t xfs /var | xargs lsblk -bno SIZE | awk "{print (\$1 > 10*2^30) ? \"yes\" : \"no\"}"' yes
-  check "/var is the var partition" 'findmnt -rno SOURCE -t xfs /var | xargs lsblk -no PARTLABEL' var
+  check "/var is on a LUKS2 volume" 'cryptsetup status var | sed -n "s/^ *type: *//p"' LUKS2
+  check "the var volume has a TPM2 token" 'cryptsetup luksDump /dev/disk/by-partlabel/var | grep -c "^  [0-9]*: systemd-tpm2"' 1
+  check "the root is on LUKS2" 'cryptsetup status root | sed -n "s/^ *type: *//p"' LUKS2
+  check "/var is the unlocked var volume" 'findmnt -rno SOURCE -t xfs /var' /dev/mapper/var
   check "selinux mode is $expect_mode" 'getenforce' "$expect_mode"
   "$vm" new-avc || fail=1
   check "no failed units" 'systemctl --failed --no-legend | wc -l' 0
-  check "no journal errors" 'journalctl -b -p err --no-pager -q | grep -avE "virt/tdx" | cut -c1-200 | head -5' ''
+  check "no journal errors" 'journalctl -b -p err --no-pager -q | grep -avE "virt/tdx|tpm tpm0: A TPM error \(256\)" | cut -c1-200 | head -5' ''
 }
 
 echo "boot 1: the initrd creates and formats the partition"
+export TPM=1 SSH_USER=root   # cryptsetup status needs root (SMBIOS credential key)
 "$vm" start vsock
 "$vm" wait
 checks

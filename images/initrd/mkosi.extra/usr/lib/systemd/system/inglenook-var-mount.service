@@ -1,5 +1,5 @@
 [Unit]
-Description=Mount the XFS /var over the state directory bootc binds there
+Description=Unlock the encrypted XFS /var and mount it over the state directory bootc binds there
 DefaultDependencies=no
 ConditionKernelCommandLine=inglenook.var=xfs
 # Not on a live stick, whose /var is RAM and whose disk must stay untouched; the
@@ -17,4 +17,5 @@ RemainAfterExit=yes
 # rootcontext: a fresh XFS root is unlabeled, which SELinux denies everything
 # in; the kernel resolves the label once PID 1 loads the policy.
 ExecStartPre=udevadm settle
-ExecStart=mount -t xfs -o nosuid,nodev,rootcontext=system_u:object_r:var_t:s0 /dev/disk/by-partlabel/var /sysroot/var
+ExecStart=systemd-cryptsetup attach var /dev/disk/by-partlabel/var - tpm2-device=auto,headless=yes
+ExecStart=mount -t xfs -o nosuid,nodev,rootcontext=system_u:object_r:var_t:s0 /dev/mapper/var /sysroot/var
