@@ -37,7 +37,7 @@ checks() {
   check "/var is xfs" 'stat -f -c %T /var' xfs
   check "/var uses the whole disk" 'findmnt -rno SOURCE -t xfs /var | xargs lsblk -bno SIZE | awk "{print (\$1 > 10*2^30) ? \"yes\" : \"no\"}"' yes
   check "/var is on a LUKS2 volume" 'cryptsetup status var | sed -n "s/^ *type: *//p"' LUKS2
-  check "the var volume has a TPM2 token" 'cryptsetup luksDump /dev/disk/by-partlabel/var | grep -c "^  [0-9]*: systemd-tpm2"' 1
+  check "the var volume has a TPM2 token" 'cryptsetup luksDump /dev/disk/by-partlabel/var 2>/dev/null | grep -c "^  [0-9]*: systemd-tpm2"' 1
   check "the root is on LUKS2" 'cryptsetup status root | sed -n "s/^ *type: *//p"' LUKS2
   check "/var is the unlocked var volume" 'findmnt -rno SOURCE -t xfs /var' /dev/mapper/var
   check "selinux mode is $expect_mode" 'getenforce' "$expect_mode"
