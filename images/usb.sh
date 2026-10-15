@@ -27,11 +27,9 @@
 # ssh.authorized_keys.root or passwd.hashed-password.user.
 #
 # Environment: TARGET_SIZE (default 14G; must fit the stick); LIVE=0 for the
-# persistent stick; XFS_VAR=1 builds the opt-in variant with all of /var on an
-# XFS partition that fills the rest of the drive: on a live stick that is the
-# system it installs (install with --root-size, see docs/install.md); with LIVE=0
-# the stick itself gets it (ROOT_SIZE, default 8G, is its root partition; see
-# AGENTS.md).
+# persistent stick, which has no encrypted /var (it travels between machines, so no TPM
+# key can follow it). A live stick's image installs with an encrypted root and an encrypted
+# XFS /var in the space after the root (docs/install.md).
 set -euo pipefail
 
 HERE=$(cd "$(dirname "$0")" && pwd)
@@ -63,15 +61,15 @@ openssl passwd -6 -stdin < "$WORK/password" | tr -d '\n' \
 # console= order: the last one becomes /dev/console, so tty0 (the screen) goes
 # last; ttyS0 still receives the kernel log for machines with a serial port.
 kargs="rw console=ttyS0,115200n8 console=tty0"
-if [[ ${XFS_VAR:-} == 1 ]]; then
-  kargs+=" inglenook.var=xfs"
-  [[ $LIVE == 1 ]] || ROOT_SIZE=${ROOT_SIZE:-8G}
-fi
+# The installed system gets an encrypted XFS /var in the space after its root (a live stick
+# ignores it); a persistent stick travels between machines and has no TPM key, so no var there.
+[[ $LIVE == 1 ]] && kargs+=" inglenook.var=xfs"
 ref=$(KARGS="$kargs" \
         "$REPO/images/build.sh" | tee /dev/stderr | sed -n 's/^built //p')
 
 "$vm" prep
-ESP_FILES=$WORK/esp TARGET_SIZE=${TARGET_SIZE:-14G} ROOT_SIZE=${ROOT_SIZE:-} "$vm" install "$ref"
+# Not encrypted: the stick moves between machines, a TPM-sealed key would not follow it.
+BLOCK_SETUP=direct ESP_FILES=$WORK/esp TARGET_SIZE=${TARGET_SIZE:-14G} ROOT_SIZE=${ROOT_SIZE:-} "$vm" install "$ref"
 
 rm -f "$WORK/inglenook.img"
 mv "$WORK/target.img" "$WORK/inglenook.img"

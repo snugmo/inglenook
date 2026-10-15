@@ -37,8 +37,9 @@ be at least that large.
 
 `LIVE=0 images/usb.sh` builds the other kind of stick instead: a full persistent
 system (state on the stick, a root partition that keeps the image size) to try
-things on a machine, with no installer image on it. `XFS_VAR=1` is about the
-system that gets *installed* (see [install.md](install.md#a-persistent-var-partition)).
+things on a machine, with no installer image on it. It is not encrypted and has no
+separate `/var` (it travels between machines, so no TPM key could follow it); the system
+that gets *installed* from a live stick has both (see [install.md](install.md)).
 
 ## Before booting
 

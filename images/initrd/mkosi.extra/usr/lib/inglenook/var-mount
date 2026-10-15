@@ -1,0 +1,12 @@
+#!/bin/sh
+# Unlock the encrypted XFS /var (partition label "var", made by inglenook-var-repart.service)
+# and mount it over the state directory bootc binds at /sysroot/var. When there is no such
+# partition (no free space after the root, or no TPM to seal its key to) /var stays on the
+# root filesystem and the boot goes on.
+udevadm settle
+if [ ! -e /dev/disk/by-partlabel/var ]; then
+  echo "inglenook: no var partition; /var stays on the root filesystem"
+  exit 0
+fi
+systemd-cryptsetup attach var /dev/disk/by-partlabel/var - tpm2-device=auto,headless=yes || exit 1
+exec mount -t xfs -o nosuid,nodev,rootcontext=system_u:object_r:var_t:s0 /dev/mapper/var /sysroot/var
