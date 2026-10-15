@@ -74,6 +74,26 @@ check "login refused with a wrong PIN" "$(pam login tok2 0000)" refused
 check "login refused without a PIN" "$(pam login tok2)" refused
 check "run0 (polkit-1) login with the right PIN" "$(pam polkit-1 tok2 $PIN)" ok
 
+# --- a LUKS home (image file) unlocked by the PIN token, with a recovery key ---
+# homectl create needs a password; the LUKS keyslot made from it outlives the record's hash
+# (the volume still opens with it), so it is random and discarded, then the slot is wiped.
+g "systemd-run -q --unit=answerer /bin/sh /var/tmp/token/answerer.sh $PIN; rm -f /run/systemd/ask-password/*
+NEWPASSWORD=\$(head -c32 /dev/urandom | base64) timeout 120 homectl create tok3 --storage=luks --disk-size=1G --shell=/bin/bash --fido2-device=auto --fido2-with-client-pin=yes --fido2-with-user-presence=yes --recovery-key=yes </dev/null 2>&1 | grep -oE '[a-z]{8}(-[a-z]{8}){7}' > /var/tmp/token/rk
+timeout 120 /var/tmp/token/nopw.sh tok3 >/dev/null 2>&1; systemctl stop answerer"
+check "LUKS home: no password, token and recovery key" 'homectl inspect tok3 | grep -E "Storage|Password OK|FIDO2 Token|Recovery Key" | tr -s " " | tr "\n" ";"' ' Password OK: no (none set); Storage: luks (strong encryption); FIDO2 Token: 1;Recovery Key: 1;'
+check "LUKS home: login with the right PIN" "$(pam login tok3 $PIN)" ok
+g 'sleep 3; homectl deactivate tok3 </dev/null >/dev/null 2>&1 || true'
+check "LUKS home: login refused with a wrong PIN" "$(pam login tok3 0000)" refused
+g 'systemctl stop softfido; sleep 1'
+check "LUKS home: recovery key unlocks it without the token" "python3 /var/tmp/token/pamtest.py login tok3 x \$(cat /var/tmp/token/rk) >/dev/null 2>&1 && echo ok || echo refused" ok
+g 'sleep 3; homectl deactivate tok3 </dev/null >/dev/null 2>&1 || true'
+check "LUKS home: no secret, no unlock" "$(pam login tok3)" refused
+check "LUKS home: three keyslots (discarded password, recovery key, token)" 'L=$(losetup -fP --show -r /home/tok3.home); cryptsetup luksDump ${L}p1 | grep -c "^  [0-9]: luks2"; losetup -d $L' 3
+check "LUKS home: the discarded password's slot can be wiped with the recovery key" 'L=$(losetup -fP --show /home/tok3.home); cat /var/tmp/token/rk | tr -d "\n" | cryptsetup luksKillSlot --key-file - ${L}p1 0; cryptsetup luksDump ${L}p1 | grep -c "^  [0-9]: luks2"; losetup -d $L' 2
+start_token --set-pin $PIN
+check "LUKS home: still unlocks with the token after the wipe" "$(pam login tok3 $PIN)" ok
+g 'sleep 3; homectl deactivate tok3 </dev/null >/dev/null 2>&1 || true'
+
 # --- pam-u2f on a plain /etc/passwd account ---
 g "python3 /var/tmp/token/ptyrun.py $PIN pamu2fcfg -N -u user -o pam://inglenook -i pam://inglenook | tr -d '\r' | grep '^user:' > /var/tmp/token/u2f_keys
 printf 'auth required pam_u2f.so authfile=/var/tmp/token/u2f_keys origin=pam://inglenook appid=pam://inglenook pinverification=1\naccount required pam_permit.so\n' > /etc/pam.d/u2ftest"
