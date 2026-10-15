@@ -6,6 +6,7 @@
 #
 #   vm.sh prep               build the installer VM disk (once)
 #   vm.sh install <image>    install <image> onto a fresh target disk
+#   vm.sh debug <script>     run a script as root in the installer VM, on the existing target disk
 #   vm.sh start [vsock|net]  boot the target disk in the background
 #   vm.sh ssh [cmd...]       ssh to the running VM as $SSH_USER (default: user)
 #   vm.sh wait               wait until ssh works
@@ -16,7 +17,11 @@
 # Environment: VM_QEMU_EXTRA (start: extra qemu arguments), ROOT_SIZE (install:
 # bootc --root-size, e.g. 12G, leaving the rest of the disk free), TARGET_SIZE (install: disk size, default 20G), ESP_FILES (install:
 # tree copied into the ESP), BOOT_DEVICE=usb|nvme (start: attach the disk as a
-# USB stick or an NVMe drive instead of virtio), KEEP_VARS=1 (start).
+# USB stick or an NVMe drive instead of virtio), KEEP_VARS=1 (start), TPM=1 (install,
+# start: attach a software TPM 2.0, state in $WORK/tpm, kept between install and
+# start and wiped by a new install; tpm-setup.sh fetches swtpm), BLOCK_SETUP=tpm2-luks
+# (install: bootc --block-setup, needs TPM=1), VM_CMDLINE (start: extra kernel command line),
+# VM_FIRSTBOOT=1 (start: let the first-boot encryption wizard run; the tests skip it).
 #
 # Debugging without a root login: VM_EXTRA_UNIT=path/to/x.service vm.sh start
 # injects that unit through the systemd.extra-unit.* credential (SMBIOS) and
@@ -40,6 +45,26 @@ cd "$WORK"
 
 qemu_common=(-accel kvm -machine q35 -cpu host -smp 4 -m 4G -display none
   -nodefaults -monitor none -no-reboot)
+
+# TPM=1: a software TPM 2.0 on a unix socket; qemu_tpm gets the qemu arguments. swtpm
+# exits when qemu disconnects (--terminate). Its state outlives the VM runs, because
+# keys sealed at install time must unseal at boot.
+qemu_tpm=()
+tpm_start() {
+  [[ -n ${TPM:-} ]] || return 0
+  local swtpm=swtpm
+  if ! command -v swtpm >/dev/null; then
+    swtpm=$REPO/build/swtpm/usr/bin/swtpm
+    [[ -x $swtpm ]] || { echo "TPM=1 needs swtpm; run $HERE/tpm-setup.sh" >&2; return 1; }
+    export LD_LIBRARY_PATH=$REPO/build/swtpm/usr/lib64:$REPO/build/swtpm/usr/lib64/swtpm
+  fi
+  mkdir -p tpm; rm -f tpm.sock
+  "$swtpm" socket --tpm2 --tpmstate dir=tpm --ctrl type=unixio,path=tpm.sock \
+    --flags startup-clear --terminate --daemon 2>/dev/null
+  for _ in $(seq 20); do [[ -S tpm.sock ]] && break; sleep 0.2; done
+  qemu_tpm=(-chardev socket,id=chrtpm,path=tpm.sock -tpmdev emulator,id=tpm0,chardev=chrtpm
+    -device tpm-tis,tpmdev=tpm0)
+}
 
 stop_pid() { # pidfile
   if [[ -f $1 ]]; then kill "$(cat "$1")" 2>/dev/null || true; rm -f "$1"; fi
@@ -76,7 +101,9 @@ cmd_prep() {
 cmd_install() {
   local ref=${1:?usage: vm.sh install <image>}
   cmd_stop
-  rm -rf share/result share/inglenook.oci share/esp share/rootsize share/imageonroot target.img
+  rm -rf share/result share/inglenook.oci share/esp share/rootsize share/imageonroot share/blocksetup target.img
+  [[ -n ${TPM:-} ]] && rm -rf tpm
+  [[ -n ${BLOCK_SETUP:-} ]] && echo "$BLOCK_SETUP" > share/blocksetup
   echo "$ref" > share/imgref
   [[ -n ${ROOT_SIZE:-} ]] && echo "$ROOT_SIZE" > share/rootsize
   # IMAGE_ON_ROOT: also leave the image, as an OCI layout directory, on the
@@ -88,9 +115,17 @@ cmd_install() {
   # example loader/credentials/*.cred).
   [[ -n ${ESP_FILES:-} ]] && cp -r "$ESP_FILES" share/esp
   podman save --format oci-archive -o share/inglenook.oci "$ref"
+  tpm_start
   truncate -s "${TARGET_SIZE:-20G}" target.img
   # SELinux off in the installer: its rootfs is unlabeled.
-  timeout 900 qemu-system-x86_64 "${qemu_common[@]}" -serial file:installer.log \
+  # With a TPM the installer boots under OVMF too (-kernel goes through the firmware's loader),
+  # so the PCRs it seals the root's key to (7, Secure Boot state) match a later boot of the target.
+  local fw=()
+  if [[ -n ${TPM:-} ]]; then
+    cp "$OVMF/OVMF_VARS.fd" installer-vars.fd
+    fw=(-drive "if=pflash,format=raw,readonly=on,file=$OVMF/OVMF_CODE.fd" -drive if=pflash,format=raw,file=installer-vars.fd)
+  fi
+  timeout 900 qemu-system-x86_64 "${qemu_common[@]}" "${qemu_tpm[@]}" "${fw[@]}" -serial file:installer.log \
     -kernel vmlinuz -initrd initramfs.img \
     -append "root=/dev/vda rw rootfstype=ext4 console=ttyS0 selinux=0" \
     -drive file=installer.img,format=raw,if=virtio,cache=unsafe \
@@ -101,6 +136,29 @@ cmd_install() {
     || { echo "install failed; see $WORK/installer.log" >&2; return 1; }
 }
 
+# vm.sh debug <script>: boot the installer VM on the existing target disk (and TPM state) and
+# run the script there as root; its output is printed. For poking at an encrypted root.
+cmd_debug() {
+  local script=${1:?usage: vm.sh debug <script>}
+  cmd_stop
+  rm -f share/debugout share/result; cp "$script" share/debugcmd
+  tpm_start
+  local fw=()
+  if [[ -n ${TPM:-} ]]; then
+    cp "$OVMF/OVMF_VARS.fd" installer-vars.fd
+    fw=(-drive "if=pflash,format=raw,readonly=on,file=$OVMF/OVMF_CODE.fd" -drive if=pflash,format=raw,file=installer-vars.fd)
+  fi
+  timeout 300 qemu-system-x86_64 "${qemu_common[@]}" "${qemu_tpm[@]}" "${fw[@]}" -serial file:installer.log \
+    -kernel vmlinuz -initrd initramfs.img \
+    -append "root=/dev/vda rw rootfstype=ext4 console=ttyS0 selinux=0" \
+    -drive file=installer.img,format=raw,if=virtio,cache=unsafe \
+    -drive file=target.img,format=raw,if=virtio,cache=unsafe \
+    -virtfs local,path=share,mount_tag=share,security_model=none,id=share \
+    -nic none || true
+  rm -f share/debugcmd
+  cat share/debugout
+}
+
 cmd_start() {
   local mode=${1:-vsock}
   cmd_stop
@@ -108,7 +166,8 @@ cmd_start() {
   # KEEP_VARS=1 keeps the firmware variables (boot entries the guest registered).
   [[ -n ${KEEP_VARS:-} && -f vars.fd ]] || cp "$OVMF/OVMF_VARS.fd" vars.fd
   rm -f qmp.sock
-  local args=("${qemu_common[@]}" -serial file:target.log -daemonize -pidfile qemu.pid
+  tpm_start
+  local args=("${qemu_common[@]}" "${qemu_tpm[@]}" -serial file:target.log -daemonize -pidfile qemu.pid
     -qmp unix:qmp.sock,server,nowait
     -drive "if=pflash,format=raw,readonly=on,file=$OVMF/OVMF_CODE.fd"
     -drive "if=pflash,format=raw,file=vars.fd")
@@ -122,6 +181,12 @@ cmd_start() {
   else
     args+=(-drive file=target.img,format=raw,if=virtio)
   fi
+  # Extra kernel command line through systemd-stub's SMBIOS string (Secure Boot is off in the VM).
+  # The first-boot disk encryption wizard (systemd-cryptenroll --firstboot) waits for input, so
+  # the tests skip it unless VM_FIRSTBOOT=1.
+  local cmdline_extra=${VM_CMDLINE:-}
+  [[ -z ${VM_FIRSTBOOT:-} ]] && cmdline_extra="systemd.firstboot=no $cmdline_extra"
+  [[ -n $cmdline_extra ]] && args+=(-smbios "type=11,value=io.systemd.stub.kernel-cmdline-extra=$cmdline_extra")
   [[ -f key.pub ]] && args+=(-smbios "type=11,value=io.systemd.credential:ssh.authorized_keys.root=$(cat key.pub)")
   # VM_QEMU_EXTRA: extra qemu arguments, word-split (e.g. a virtual smartcard
   # reader: "-device usb-ccid").
@@ -200,5 +265,5 @@ cmd_stop() {
   stop_pid vsockd.pid
 }
 
-sub=${1:?usage: vm.sh prep|install|start|ssh|wait|avc|new-avc|stop}
+sub=${1:?usage: vm.sh prep|install|debug|start|ssh|wait|avc|new-avc|stop}
 "cmd_${sub//-/_}" "${@:2}"

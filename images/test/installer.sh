@@ -5,16 +5,23 @@ exec > >(tee /dev/ttyS0) 2>&1
 set -x
 mkdir -p /mnt/share
 mount -t 9p -o trans=virtio,version=9p2000.L share /mnt/share || echo MOUNTFAIL
+# vm.sh debug: run a script against the existing target disk and TPM instead of installing.
+if [ -e /mnt/share/debugcmd ]; then
+  sh /mnt/share/debugcmd > /mnt/share/debugout 2>&1
+  sync; systemctl poweroff -f
+fi
 IMG=$(cat /mnt/share/imgref)
 podman rmi -f "$IMG" || true
 podman load -i /mnt/share/inglenook.oci
 # ROOT_SIZE (optional, from vm.sh install): leave free space after the root.
 ROOT_SIZE=$(cat /mnt/share/rootsize 2>/dev/null)
+# BLOCK_SETUP (optional): bootc --block-setup, e.g. tpm2-luks (needs the VM's virtual TPM).
+BLOCK_SETUP=$(cat /mnt/share/blocksetup 2>/dev/null)
 podman run --rm --privileged --pid=host --security-opt label=disable \
   -v /dev:/dev -v /var/lib/containers:/var/lib/containers \
   "$IMG" \
   bootc install to-disk --composefs-backend --bootloader systemd --generic-image --wipe \
-    --filesystem ext4 --skip-fetch-check ${ROOT_SIZE:+--root-size "$ROOT_SIZE"} /dev/vdb
+    --filesystem ext4 --skip-fetch-check ${ROOT_SIZE:+--root-size "$ROOT_SIZE"} ${BLOCK_SETUP:+--block-setup "$BLOCK_SETUP"} /dev/vdb
 rc=$?
 if [ "$rc" -eq 0 ] && [ -d /mnt/share/esp ]; then
   mkdir -p /mnt/esp
