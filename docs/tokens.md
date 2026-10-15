@@ -45,6 +45,27 @@ locks the account. `$PIN` is not honoured by `homectl create`; in scripts answer
 | ssh `ecdsa-sk` key | works with the token, `device not found` without it; not part of `token.sh` |
 | SELinux | no denials from homed, pam_u2f or the token devices |
 
+## LUKS homes (`--storage=luks`)
+
+The homed default. Each home is a sparse image file `/home/<user>.home` (GPT, then LUKS2, then btrfs); the
+record is in `/var/lib/systemd/home/<user>.identity`. The token is then also what unlocks the data: homed
+adds one LUKS keyslot per credential (the FIDO2 hmac-secret is the passphrase), another for a recovery key.
+`token.sh` checks all of the following with the software token.
+
+- **Create** like a directory home; add `--recovery-key=yes` (printed once, save it) and `--disk-size=` if
+  the default (85% of free space) is too big. Strip the password afterwards with `nopw.sh`.
+- **The password keyslot outlives the record's hash.** After `nopw.sh` homed refuses the password, but the
+  LUKS volume still opens with it (`cryptsetup open --test-passphrase`), so anyone with the image file and
+  that password bypasses the token. Create with a random password you discard, then wipe the slot while
+  the home is inactive: `cryptsetup luksKillSlot --key-file <recovery key> /dev/loopNp1 0` (attach with
+  `losetup -fP`, the key file must not end in a newline). homed keeps working with the other two slots.
+- Token + PIN unlocks; wrong PIN is refused; the recovery key unlocks without the token (PAM asks the PIN
+  first, then "Try again with password"); no secret, no unlock.
+- The image file is resized by homed (rebalancing): a 2G `--disk-size` home was 274M after the first
+  logout. Not yet looked into: `--auto-resize-mode` and fixed sizes.
+- Not tried: LUKS homes on the XFS `/var` variant, discard settings, ssh login to a LUKS home, a second token
+  for redundancy, enrolling a token into an existing home (`homectl update --fido2-device=`).
+
 ## Limits to know before relying on it
 
 - **ssh to a homed user needs the token in the server.** The public-key login only works because homed
