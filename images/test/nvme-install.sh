@@ -36,8 +36,7 @@ VM_QEMU_EXTRA="-drive file=nvme.img,format=raw,if=none,id=nvm -device nvme,drive
 "$vm" ssh 'lsblk -dno NAME,SIZE,TRAN,MODEL | grep -E "^(nvme|sd)"'
 
 # The commands from docs/install.md, run as root.
-ROOT_SIZE=${ROOT_SIZE:-}   # set for the XFS /var stick, which needs free space
-root_opt=${ROOT_SIZE:+--root-size $ROOT_SIZE}
+ROOT_SIZE=${ROOT_SIZE:-8G}   # the rest of the drive becomes the encrypted XFS /var
 root_sh() { SSH_USER=root "$vm" ssh "sh -c '$1'"; }
 # The live stick runs the installer from its own root (podman --rootfs /) and
 # installs from the OCI directory kept on the stick, so nothing is copied into
@@ -45,7 +44,8 @@ root_sh() { SSH_USER=root "$vm" ssh "sh -c '$1'"; }
 root_sh "podman run --rm --privileged --pid=host --security-opt label=type:unconfined_t \\
   -v /dev:/dev -v /sysroot/installer:/installer:ro --rootfs /:O \\
   bootc install to-disk --composefs-backend --bootloader systemd --filesystem ext4 \\
-  --source-imgref oci:/installer/inglenook:latest $root_opt --wipe /dev/nvme0n1"
+  --block-setup tpm2-luks --root-size $ROOT_SIZE \\
+  --source-imgref oci:/installer/inglenook:latest --wipe /dev/nvme0n1"
 "$vm" ssh 'lsblk -no NAME,SIZE,FSTYPE,PARTLABEL /dev/nvme0n1'
 # Carry the stick's credentials (the console password) over to the new ESP, which
 # the install does not copy; then show what ended up on it.
@@ -63,7 +63,7 @@ check() { # description command-run-in-guest expected-output
   local got; got=$("$vm" ssh "$2" 2>&1 || true)
   if [[ $got == "$3" ]]; then echo "ok   $1"; else echo "FAIL $1: got '$got', want '$3'"; fail=1; fi
 }
-check "running from the nvme drive" 'findmnt -no SOURCE /sysroot | grep -c nvme0n1' 1
+check "running from the nvme drive" 'lsblk -srno NAME "$(findmnt -no SOURCE /sysroot)" | grep -cx nvme0n1' 1
 check "hostname" 'hostnamectl hostname' inglenook
 check "selinux mode is $expect_mode" 'getenforce' "$expect_mode"
 check "no failed units" 'systemctl --failed --no-legend | wc -l' 0
@@ -78,9 +78,9 @@ salt=$(cut -d'$' -f3 <<<"$hash")
 if [[ -n $salt && $hash == "$(openssl passwd -6 -salt "$salt" -stdin <<<"$pw")" ]]; then
   echo "ok   console password was applied from the carried-over credential"
 else echo "FAIL console password was not applied"; fail=1; fi
-if [[ -n $ROOT_SIZE ]]; then
-  check "/var is xfs on the same drive" 'stat -f -c %T /var' xfs
-  check "/var is the var partition" 'findmnt -rno SOURCE -t xfs /var | xargs lsblk -no PARTLABEL' var
-fi
+check "/var is xfs" 'stat -f -c %T /var' xfs
+check "/var is the unlocked var volume" 'findmnt -rno SOURCE -t xfs /var' /dev/mapper/var
+got=$(root_sh 'for v in root var; do cryptsetup status $v | sed -n "s/^ *type: *//p"; done | tr "\n" " "')
+if [[ $got == "LUKS2 LUKS2 " ]]; then echo "ok   the root and /var are LUKS2"; else echo "FAIL the root and /var are LUKS2: got '$got'"; fail=1; fi
 "$vm" new-avc || fail=1
 exit $fail
