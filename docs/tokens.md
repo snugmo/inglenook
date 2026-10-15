@@ -67,23 +67,37 @@ adds one LUKS keyslot per credential (the FIDO2 hmac-secret is the passphrase), 
 - Token + PIN unlocks; wrong PIN is refused; the recovery key unlocks without the token (PAM asks the PIN
   first, then "Try again with password"); no secret, no unlock.
 
-### Changing credentials after creation does not work for token-only homes (systemd 262, tested)
+### Several tokens, a recovery key, and changing them later (systemd 262, tested; code read at v262)
 
-- `homectl update` of a token-only LUKS home asks for a password; if it is active instead, the keyslot sync
-  fails with "Required key not available". The recovery key as `PASSWORD=` fails too ("Invalid argument").
-- With a password still in the record, `homectl update --fido2-device=` **replaces** the enrolled token
-  (the old one stops working) instead of adding a second one.
-- A recovery key added by `homectl update --recovery-key=yes` is stored in the record but gets **no LUKS
-  keyslot**, so it cannot unlock the volume (`cryptsetup` rejects it). Only a recovery key made by
-  `homectl create` works.
-- Merging a second token's `fido2HmacCredential`/`fido2HmacSalt` into the record by hand is accepted but
-  creates no keyslot for it: only the token with a slot still logs in.
-- `systemd-cryptenroll` on the image would add LUKS slots, but homed unlocks only with the secrets of its
-  own record, so those slots are not used by it.
-- Consequence for the design: decide the credentials when the home is created (token, recovery key), and
-  for a second token or a later recovery key plan to re-create the home or keep a password in the record.
-  Not tried: `--fido2-device=` more than once, `homectl passwd`/password-based flows to resync slots,
-  LUKS homes on the XFS `/var` variant, ssh login to a LUKS home.
+homed rewrites **all** LUKS keyslots at once (`home_passwd_luks`): it adds a slot for every password it
+currently holds, then destroys every other slot. So:
+
+- **Several tokens work, but only when all are plugged in and given in one command**:
+  `homectl create … --fido2-device=/dev/hidraw0 --fido2-device=/dev/hidraw1 --recovery-key=yes` gives four
+  slots (password, recovery key, two tokens); each token, and the recovery key, unlocks the home alone.
+  `--fido2-device=` is repeatable, but each use drops the record's existing tokens, so
+  `homectl update --fido2-device=B` alone **replaces** A with B (A stops working). Re-list every token
+  to keep it (`--fido2-device=A --fido2-device=B`).
+- **A recovery key or second token can be added later, with conditions**: the record must still hold a
+  hashed password and its plaintext must be supplied (`PASSWORD=`), and all tokens must be plugged in.
+  `homectl update m2 --fido2-device=A --fido2-device=B --recovery-key=yes` took a 2-slot home to 4 slots
+  and the recovery key opened it.
+- **`homectl update --recovery-key=yes` on its own does not touch the keyslots.** The record gets the
+  hashed key, the LUKS header gets nothing, so the key cannot unlock the volume. In `homectl.c`
+  `and_change_password` is true only for `--fido2-device`/`--pkcs11-token-uri`, not `--recovery-key`;
+  yet the homectl man page's own example is `homectl update emily --recovery-key=yes`. Looks like an
+  upstream bug (not reported by us; upstream issues not checked). Workaround: pass a token option in the
+  same command.
+- **A record with no hashed password cannot have its keyslots changed**: the sync refuses ("User record
+  has no hashed passwords"). That is the state `nopw.sh` leaves, hence "Required key not available" on an
+  active home and "Invalid argument" with the recovery key as `PASSWORD=`. Every recovery key in the
+  record needs its plaintext at each sync too ("Missing plaintext recovery key"). So with a
+  token-only home, plan to put a temporary hashed password back (and type the recovery key) to change
+  credentials. Not tested.
+- **`systemd-cryptenroll` refuses**: "LUKS2 volume is managed by systemd-homed, please use homectl to
+  enroll tokens." A slot added by `cryptsetup luksAddKey` instead would be unknown to homed (it only
+  tries the passwords of its record) and the next sync destroys it.
+- Not tried: LUKS homes on the XFS `/var` variant, ssh login to a LUKS home, `homectl passwd` flows.
 
 ## Limits to know before relying on it
 
