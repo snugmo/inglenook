@@ -94,6 +94,15 @@ currently holds, then destroys every other slot. So:
   record needs its plaintext at each sync too ("Missing plaintext recovery key"). So with a
   token-only home, plan to put a temporary hashed password back (and type the recovery key) to change
   credentials. Not tested.
+- **Adding or changing a token needs every enrolled token plugged in** (tested): with token B unplugged,
+  a sync (`homectl passwd`) fails with "Resource temporarily unavailable" and changes nothing (still 3
+  slots). A token can instead be **dropped on purpose**: `homectl update --fido2-device=A --fido2-device=C`
+  with B unplugged succeeded; afterwards A and C unlock the home alone, B no longer does, and the slot
+  count stayed 3. That is the path for a lost or stolen key.
+- **Recovery key plus password at a sync**: with both in the record, `PASSWORD=<password>` is not enough;
+  homectl prompts for the recovery key ("Recovery key incorrect or not sufficient, please try again")
+  and the update then goes through when the key is answered (2 → 4 slots, two tokens). In scripts, answer
+  the ask-password queue as the tests do.
 - **`systemd-cryptenroll` refuses**: "LUKS2 volume is managed by systemd-homed, please use homectl to
   enroll tokens." A slot added by `cryptsetup luksAddKey` instead would be unknown to homed (it only
   tries the passwords of its record) and the next sync destroys it.
