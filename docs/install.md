@@ -30,17 +30,24 @@ podman run --rm --privileged --pid=host \
     --security-opt label=type:unconfined_t \
     -v /dev:/dev -v /sysroot/installer:/installer:ro --rootfs /:O \
     bootc install to-disk --composefs-backend --bootloader systemd \
-        --filesystem ext4 --source-imgref oci:/installer/inglenook:latest \
-        --wipe /dev/nvme0n1
+        --filesystem ext4 --block-setup tpm2-luks --root-size 64G \
+        --source-imgref oci:/installer/inglenook:latest --wipe /dev/nvme0n1
 ```
+
+`--block-setup tpm2-luks` encrypts the root with LUKS2 and seals its key to the machine's
+TPM 2.0 (no password at boot); `--root-size` leaves the rest of the drive for the
+encrypted `/var` (below). Everything except the ESP is encrypted, apart from a small
+empty `boot` partition that bootc adds when the root is encrypted. A machine without a
+TPM can use `--block-setup direct` and leave out `--root-size`; its disk is then not
+encrypted.
 
 That single command does everything you listed:
 
 | Step | Result on `/dev/nvme0n1` |
 | --- | --- |
-| partitions the drive (GPT) | `p1` 1 MiB BIOS boot (unused on UEFI), `p2` 1 GiB EFI System, `p3` root (the rest of the drive, or `--root-size`) |
+| partitions the drive (GPT) | `p1` 1 MiB BIOS boot (unused on UEFI), `p2` 1 GiB EFI System, `p3` an empty `boot` partition (bootc adds it for an encrypted root), `p4` the LUKS2 root (`--root-size`, or the rest of the drive) |
 | writes the ESP | FAT32, mounted at `/boot`: `\EFI\BOOT\BOOTX64.EFI` (systemd-boot as the removable-media fallback) and `\EFI\systemd\systemd-bootx64.efi`; the UKI as `\EFI\Linux\bootc\bootc_composefs-<digest>.efi`; `\loader\loader.conf` and a boot-loader-spec entry in `\loader\entries\`. No NVRAM boot entry is registered (see below) |
-| root filesystem | ext4 with fs-verity enabled (`-O verity`, which composefs wants), holding the composefs object store and the per-deployment state, including `/etc` and `/var` |
+| root filesystem | ext4 with fs-verity enabled (`-O verity`, which composefs wants) inside the LUKS2 volume, holding the composefs object store and the per-deployment state, including `/etc`. The root stays ext4: composefs needs fs-verity, which `mkfs.xfs` does not offer |
 
 The kernel command line (including `composefs=<digest>`, `rw`, `enforcing=0` and
 the hostname) lives inside the UKI, so the installed system boots exactly like
@@ -69,30 +76,21 @@ NVMe drive (use the firmware boot menu if it still prefers the stick). The
 installed system has the same logins as the stick: the ssh key is baked into the
 image.
 
-## A persistent `/var` partition
+## `/var`: an encrypted XFS partition
 
-By default `/var` of the installed system is a directory on the root filesystem,
-so it is persistent already, just not on its own partition. For all of `/var` on
-its own XFS partition build the stick with the XFS flag:
+The image's kernel command line has `inglenook.var=xfs` (the live stick ignores it, its
+`/var` is RAM). On the first boot after the install the initrd runs `systemd-repart`, which
+creates a LUKS2 partition (label `var`, key sealed to the TPM) with XFS in all the space after
+the root, and mounts it as `/var`; the next boots unlock it from the TPM and mount it.
+Without free space after the root (no `--root-size`) or without a TPM nothing is created and
+`/var` stays a directory on the root filesystem, with a logged error in the TPM case.
 
-```sh
-XFS_VAR=1 WORK=$PWD/build/usb-xfs images/usb.sh      # on the build machine; write that image to the stick
-```
-
-The image gets the `inglenook.var=xfs` flag in its UKI, so the installed system
-creates the partition; the live stick skips that (its `/var` is RAM). Install
-with a limited root so there is free space left on the drive:
-
-```sh
-... bootc install to-disk --composefs-backend --bootloader systemd \
-        --filesystem ext4 --source-imgref oci:/installer/inglenook:latest \
-        --root-size 64G --wipe /dev/nvme0n1
-```
-
-On first boot the initrd creates the XFS partition in everything after the root
-(`systemd-repart`), mounts it as `/var` and the system carries on; the next boots
-just mount it. Details are in AGENTS.md (the opt-in XFS `/var`). Putting `/var`
-on a different filesystem later by hand is possible but not what is tested.
+Then, on that first boot, `systemd-cryptenroll --firstboot` runs in the initrd and asks on the
+console whether to enroll more unlock methods for `/var`: a recovery key, a passphrase or a
+FIDO2 token that is plugged in (see [tokens.md](tokens.md)). Leave it empty to skip; later
+`systemd-cryptenroll /dev/disk/by-partlabel/var --recovery-key` (and `--fido2-device=auto`)
+add them, each one independent of the others. The sealed key has no PCR policy yet, so the TPM
+only proves "this machine", not "this boot chain".
 
 ## Afterwards
 
@@ -101,6 +99,9 @@ on a different filesystem later by hand is possible but not what is tested.
   from. Once the image is published, add
   `--target-imgref ghcr.io/snugmo/inglenook:<tag>` to the install command (or
   run `bootc switch` later) so that `bootc upgrade` has somewhere to pull from.
-- Other layouts (keeping existing partitions, dual boot, LUKS) need
+- Other layouts (keeping existing partitions, dual boot) need
   `bootc install to-filesystem` on a filesystem you prepared yourself; that path
   is not tested here.
+- The root volume has only the TPM slot (bootc wipes the other slots), no recovery key:
+  if the TPM is cleared or the board replaced, reinstall; user data on `/var` is the part to
+  give a recovery key (`systemd-cryptenroll /dev/disk/by-partlabel/var --recovery-key`).

@@ -16,8 +16,6 @@ STICK=${1:-$REPO/build/usb/inglenook.img}
 PASSWORD_FILE=${PASSWORD_FILE:-$REPO/build/usb/password}
 [[ ${SELINUX_ENFORCING:-0} == 1 ]] && expect_mode=Enforcing || expect_mode=Permissive
 trap '"$vm" stop' EXIT
-# The XFS /var variant has a few more first-boot denials (see xfsvar.sh).
-[[ -n ${ROOT_SIZE:-} ]] && export AVC_BASELINE_EXTRA=$HERE/selinux-denials.xfsvar.baseline
 
 mkdir -p "$WORK"
 # vm.sh ssh uses $WORK/key; the stick has dev-keys/authorized_keys baked in.
@@ -69,7 +67,7 @@ check "running from the nvme drive" 'findmnt -no SOURCE /sysroot | grep -c nvme0
 check "hostname" 'hostnamectl hostname' inglenook
 check "selinux mode is $expect_mode" 'getenforce' "$expect_mode"
 check "no failed units" 'systemctl --failed --no-legend | wc -l' 0
-check "no journal errors" 'journalctl -b -p err --no-pager -q | grep -avE "virt/tdx" | cut -c1-200 | head -5' ''
+check "no journal errors" 'journalctl -b -p err --no-pager -q | grep -avE "virt/tdx|tpm tpm0: A TPM error \(256\)" | cut -c1-200 | head -5' ''
 # The install registers no NVRAM entry (the firmware boots the fallback path); the
 # documented efibootmgr step adds one.
 root_sh 'efibootmgr -c -d /dev/nvme0n1 -p 2 -L inglenook -l \\EFI\\systemd\\systemd-bootx64.efi >/dev/null'

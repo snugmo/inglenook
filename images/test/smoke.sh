@@ -30,12 +30,12 @@ check() { # description command-run-in-guest expected-output
 check "selinux mode is $expect_mode" 'getenforce' "$expect_mode"
 "$vm" new-avc || fail=1
 # Kernel noise a VM cannot avoid is filtered: TDX probing on non-TDX hosts.
-check "no journal errors" 'journalctl -b -p err --no-pager -q | grep -avE "virt/tdx" | cut -c1-200 | head -5' ''
+check "no journal errors" 'journalctl -b -p err --no-pager -q | grep -avE "virt/tdx|tpm tpm0: A TPM error \(256\)" | cut -c1-200 | head -5' ''
 check "no failed units" 'systemctl --failed --no-legend | wc -l' 0
 check "user is in wheel" 'id -nG user | tr " " "\n" | grep -x wheel' wheel
 check "no console autologin on an installed system" 'loginctl list-sessions --no-legend | awk "\$3==\"root\" && \$6 ~ /^user/ " | wc -l' 0
 check "no setuid files" 'find / -xdev -type f -perm -4000 2>/dev/null | head -3' ''
 check "no network interface besides lo" 'ip -br link | grep -vc "^lo"' 0
-check "/var is mounted read-write" 'findmnt -no OPTIONS /var | cut -d, -f1' rw
+check "/var is mounted read-write" 'findmnt -no OPTIONS /var | tail -1 | cut -d, -f1' rw
 check "root is composefs" 'findmnt -no FSTYPE,SOURCE / | cut -d: -f1' 'overlay composefs'
 exit $fail

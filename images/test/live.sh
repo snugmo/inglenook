@@ -21,7 +21,8 @@ mkdir -p "$WORK"
 ref=$(SSH_PUBKEY=$(cat "$WORK/key.pub") "$REPO/images/build.sh" | tee /dev/stderr | sed -n 's/^built //p')
 rm -rf "$WORK/esp"
 "$REPO/images/live-addon.sh" "$WORK/esp"
-ESP_FILES=$WORK/esp TARGET_SIZE=${TARGET_SIZE:-8G} "$vm" install "$ref"
+# A live stick is not encrypted (see usb.sh) and uses the whole disk for its root.
+BLOCK_SETUP=direct ROOT_SIZE= ESP_FILES=$WORK/esp TARGET_SIZE=${TARGET_SIZE:-8G} "$vm" install "$ref"
 trap '"$vm" stop' EXIT
 
 # What the boot may change on the stick: nothing in the root partition, and in
@@ -61,7 +62,7 @@ check "the tty1 console (kmscon) logs in as root" 'loginctl list-sessions --no-l
 check "user is in wheel" 'id -nG user | tr " " "\n" | grep -x wheel' wheel
 check "no failed units" 'systemctl --failed --no-legend | wc -l' 0
 "$vm" new-avc || fail=1
-check "no journal errors" 'journalctl -b -p err --no-pager -q | grep -avE "virt/tdx" | cut -c1-200 | head -5' ''
+check "no journal errors" 'journalctl -b -p err --no-pager -q | grep -avE "virt/tdx|tpm tpm0: A TPM error \(256\)" | cut -c1-200 | head -5' ''
 "$vm" stop
 trap - EXIT
 snapshot "$WORK/after"

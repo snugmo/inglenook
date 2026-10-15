@@ -11,8 +11,6 @@ REPO=$(cd "$HERE/../.." && pwd)
 WORK=${WORK:-$REPO/build/xfsvar}
 export WORK
 vm=$HERE/vm.sh
-# First boot on a brand-new XFS /var: journald briefly sees unlabeled objects.
-export AVC_BASELINE_EXTRA=$HERE/selinux-denials.xfsvar.baseline
 # The UKI is permissive by default while the policy is worked out (the build
 # honors SELINUX_ENFORCING too); expect the matching mode.
 [[ ${SELINUX_ENFORCING:-0} == 1 ]] && expect_mode=Enforcing || expect_mode=Permissive

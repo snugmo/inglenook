@@ -18,4 +18,5 @@ RemainAfterExit=yes
 # Idempotent: with the partition already there repart finds nothing to do. It
 # works on the disk that backs /sysroot, which is still the plain ext4 root at
 # this point (bootc-root-setup has not run).
-ExecStart=systemd-repart --dry-run=no --root=/sysroot --definitions=/usr/lib/inglenook/repart.d --no-pager
+# A failure (no TPM, no free space) leaves /var on the root and is logged, not fatal.
+ExecStart=-systemd-repart --dry-run=no --root=/sysroot --definitions=/usr/lib/inglenook/repart.d --no-pager

@@ -15,7 +15,7 @@
 #   vm.sh new-avc            the denials not in selinux-denials.baseline; exit 1 if any
 #
 # Environment: VM_QEMU_EXTRA (start: extra qemu arguments), ROOT_SIZE (install:
-# bootc --root-size, e.g. 12G, leaving the rest of the disk free), TARGET_SIZE (install: disk size, default 20G), ESP_FILES (install:
+# bootc --root-size, default 8G; set it empty for the whole disk), TARGET_SIZE (install: disk size, default 20G), ESP_FILES (install:
 # tree copied into the ESP), BOOT_DEVICE=usb|nvme (start: attach the disk as a
 # USB stick or an NVMe drive instead of virtio), KEEP_VARS=1 (start), TPM=1 (install,
 # start: attach a software TPM 2.0, state in $WORK/tpm, kept between install and
@@ -38,6 +38,10 @@ REPO=$(cd "$HERE/../.." && pwd)
 WORK=${WORK:-$REPO/build/vm}
 BASE=registry.fedoraproject.org/fedora-bootc:${FEDORA_VERSION:-45}
 OVMF=/usr/share/OVMF
+
+# The test VM has a software TPM and installs an encrypted root by default (TPM=0: neither).
+: "${TPM=1}"
+[[ $TPM == 0 ]] && TPM=
 
 mkdir -p "$WORK/share"
 # Unix socket paths are limited to 108 bytes; use relative ones from here.
@@ -100,6 +104,11 @@ cmd_prep() {
 
 cmd_install() {
   local ref=${1:?usage: vm.sh install <image>}
+  # Defaults: an 8G root (the rest of the disk becomes the encrypted XFS /var in the initrd), a
+  # root encrypted with the TPM. Set but empty ROOT_SIZE means the whole disk; BLOCK_SETUP=direct
+  # means no encryption.
+  : "${ROOT_SIZE=8G}"
+  [[ -n ${TPM:-} ]] && : "${BLOCK_SETUP=tpm2-luks}"
   cmd_stop
   rm -rf share/result share/inglenook.oci share/esp share/rootsize share/imageonroot share/blocksetup target.img
   [[ -n ${TPM:-} ]] && rm -rf tpm

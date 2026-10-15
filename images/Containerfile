@@ -207,7 +207,7 @@ FROM base AS uki
 ARG COMPOSEFS_DIGEST
 # rw: the composefs root and the /var, /etc binds from /sysroot inherit its
 # mount flags, and nothing else remounts /sysroot read-write.
-ARG KARGS="rw console=tty0 console=ttyS0,115200n8"
+ARG KARGS="rw console=tty0 console=ttyS0,115200n8 inglenook.var=xfs"
 # The initrd's own systemd sets the hostname from *its* os-release before the
 # real root starts, so DEFAULT_HOSTNAME in the image's os-release is not enough;
 # a static /etc/hostname still overrides systemd.hostname=.

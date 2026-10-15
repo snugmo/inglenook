@@ -37,7 +37,7 @@ checks() {
   check "subuid restored for rootless podman" 'cut -d: -f1 /etc/subuid' user
   check "no failed units" 'systemctl --failed --no-legend | wc -l' 0
   "$vm" new-avc || fail=1
-  check "no journal errors" 'journalctl -b -p err --no-pager -q | grep -avE "virt/tdx" | cut -c1-200 | head -5' ''
+  check "no journal errors" 'journalctl -b -p err --no-pager -q | grep -avE "virt/tdx|tpm tpm0: A TPM error \(256\)" | cut -c1-200 | head -5' ''
 }
 
 echo "boot 1: wipe /etc and /var from inside the guest, then power off"

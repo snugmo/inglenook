@@ -16,6 +16,4 @@ RemainAfterExit=yes
 # bootc already made at /sysroot/var, and skips a mount unit for that path.
 # rootcontext: a fresh XFS root is unlabeled, which SELinux denies everything
 # in; the kernel resolves the label once PID 1 loads the policy.
-ExecStartPre=udevadm settle
-ExecStart=systemd-cryptsetup attach var /dev/disk/by-partlabel/var - tpm2-device=auto,headless=yes
-ExecStart=mount -t xfs -o nosuid,nodev,rootcontext=system_u:object_r:var_t:s0 /dev/mapper/var /sysroot/var
+ExecStart=/usr/lib/inglenook/var-mount
