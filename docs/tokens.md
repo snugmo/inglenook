@@ -52,19 +52,38 @@ record is in `/var/lib/systemd/home/<user>.identity`. The token is then also wha
 adds one LUKS keyslot per credential (the FIDO2 hmac-secret is the passphrase), another for a recovery key.
 `token.sh` checks all of the following with the software token.
 
-- **Create** like a directory home; add `--recovery-key=yes` (printed once, save it) and `--disk-size=` if
-  the default (85% of free space) is too big. Strip the password afterwards with `nopw.sh`.
+- **Create** like a directory home with `--recovery-key=yes` (printed once, save it; or
+  `--recovery-key-file=`), `--disk-size=` (the default is 85% of free space) and `--auto-resize-mode=off`
+  if the size must stay fixed (the default, `shrink-and-grow`, shrank a 1G home to 274M at logout and
+  grows it again at login). The password needs `NEWPASSWORD` and passes homed's quality check (a
+  base64 random string does, `pw1` does not). Strip the password from the record with `nopw.sh`.
 - **The password keyslot outlives the record's hash.** After `nopw.sh` homed refuses the password, but the
   LUKS volume still opens with it (`cryptsetup open --test-passphrase`), so anyone with the image file and
-  that password bypasses the token. Create with a random password you discard, then wipe the slot while
-  the home is inactive: `cryptsetup luksKillSlot --key-file <recovery key> /dev/loopNp1 0` (attach with
-  `losetup -fP`, the key file must not end in a newline). homed keeps working with the other two slots.
+  that password bypasses the token. Create with a random password you discard, then wipe slot 0 while the
+  home is inactive: `cryptsetup luksKillSlot --key-file <recovery key> /dev/loopNp1 0` (attach with
+  `losetup -fP`; the key file must not end in a newline). cryptsetup will not authorize a wipe with the
+  slot's own passphrase ("No key available with this passphrase"), so another slot is needed: the
+  recovery key made at creation. homed keeps working with the token and recovery slots.
 - Token + PIN unlocks; wrong PIN is refused; the recovery key unlocks without the token (PAM asks the PIN
   first, then "Try again with password"); no secret, no unlock.
-- The image file is resized by homed (rebalancing): a 2G `--disk-size` home was 274M after the first
-  logout. Not yet looked into: `--auto-resize-mode` and fixed sizes.
-- Not tried: LUKS homes on the XFS `/var` variant, discard settings, ssh login to a LUKS home, a second token
-  for redundancy, enrolling a token into an existing home (`homectl update --fido2-device=`).
+
+### Changing credentials after creation does not work for token-only homes (systemd 262, tested)
+
+- `homectl update` of a token-only LUKS home asks for a password; if it is active instead, the keyslot sync
+  fails with "Required key not available". The recovery key as `PASSWORD=` fails too ("Invalid argument").
+- With a password still in the record, `homectl update --fido2-device=` **replaces** the enrolled token
+  (the old one stops working) instead of adding a second one.
+- A recovery key added by `homectl update --recovery-key=yes` is stored in the record but gets **no LUKS
+  keyslot**, so it cannot unlock the volume (`cryptsetup` rejects it). Only a recovery key made by
+  `homectl create` works.
+- Merging a second token's `fido2HmacCredential`/`fido2HmacSalt` into the record by hand is accepted but
+  creates no keyslot for it: only the token with a slot still logs in.
+- `systemd-cryptenroll` on the image would add LUKS slots, but homed unlocks only with the secrets of its
+  own record, so those slots are not used by it.
+- Consequence for the design: decide the credentials when the home is created (token, recovery key), and
+  for a second token or a later recovery key plan to re-create the home or keep a password in the record.
+  Not tried: `--fido2-device=` more than once, `homectl passwd`/password-based flows to resync slots,
+  LUKS homes on the XFS `/var` variant, ssh login to a LUKS home.
 
 ## Limits to know before relying on it
 
