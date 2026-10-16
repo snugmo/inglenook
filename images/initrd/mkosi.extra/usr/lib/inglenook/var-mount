@@ -8,5 +8,5 @@ if [ ! -e /dev/disk/by-partlabel/var ]; then
   echo "inglenook: no var partition; /var stays on the root filesystem"
   exit 0
 fi
-systemd-cryptsetup attach var /dev/disk/by-partlabel/var - tpm2-device=auto,headless=yes || exit 1
+systemd-cryptsetup attach var /dev/disk/by-partlabel/var - tpm2-device=auto,fido2-device=auto,headless=yes || exit 1
 exec mount -t xfs -o nosuid,nodev,rootcontext=system_u:object_r:var_t:s0 /dev/mapper/var /sysroot/var
