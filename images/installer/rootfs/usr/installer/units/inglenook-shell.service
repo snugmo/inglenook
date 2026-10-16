@@ -2,6 +2,8 @@
 Description=Inglenook installer shell
 DefaultDependencies=no
 After=basic.target
+# a TPM that firmware reports is up before the first prompt (ordering only, no Wants=)
+After=tpm2.target
 Conflicts=shutdown.target
 Before=shutdown.target
 
