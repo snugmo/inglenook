@@ -39,4 +39,22 @@ the units are reachable through their symlinks${T}systemctl is-active inglenook-
 the boot medium is one vfat partition${T}lsblk -no FSTYPE,LABEL /dev/sda1 /dev/sda${T}vfat +INGLENOOK
 gdisk is installed${T}gdisk --version${T}GPT fdisk
 sgdisk makes a GPT${T}truncate -s 64M /tmp/d.img && sgdisk -o -n 1:0:0 -c 1:x /tmp/d.img >/dev/null && sgdisk -p /tmp/d.img${T}^ +1 +2048 
+util-linux works${T}lsblk --version${T}util-linux
+xfsprogs works${T}mkfs.xfs -V${T}mkfs.xfs version
+btrfs-progs works${T}btrfs --version${T}btrfs-progs
+cryptsetup works${T}cryptsetup --version${T}cryptsetup
+fuse3 works${T}fusermount3 --version${T}fusermount3
+iputils works${T}ping -V${T}iputils
+iproute works${T}ip -V${T}iproute2
+curl works${T}curl --version${T}curl
+tar works${T}tar --version${T}GNU tar
+gzip works${T}gzip --version${T}gzip
+bzip2 works${T}bzip2 --help 2>&1${T}bzip2
+zstd works${T}zstd --version${T}Zstandard
+xz works${T}xz --version${T}xz
+zip works${T}zip -v${T}Zip
+unzip works${T}unzip -v${T}UnZip
+procps-ng works${T}ps --version${T}procps-ng
+less works${T}less --version${T}less
+which works${T}which which${T}which
 CHECKS
