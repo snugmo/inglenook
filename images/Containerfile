@@ -129,7 +129,14 @@ RUN sed -i 's/^DEFAULT_HOSTNAME=.*/DEFAULT_HOSTNAME="inglenook"/' /usr/lib/os-re
 # over ssh. This is /etc (authselect links /etc/pam.d), carried by the factory
 # copy below. pam-u2f is installed but its feature (with-pam-u2f) stays off:
 # turning it on makes every plain account need a key mapping.
-RUN authselect select $(authselect current --raw) with-systemd-homed --force
+# with-group-merging makes the nsswitch group line `files [SUCCESS=merge]
+# altfiles [SUCCESS=merge] systemd`: glibc otherwise stops at the first source
+# that knows a group, and wheel exists (empty) in /etc/group and /usr/lib/group,
+# so the members that homed publishes through nss-systemd were never seen
+# (getent group wheel was empty, polkit found no administrators). Use the
+# feature, not an edit of the generated file: authselect regenerates it.
+RUN authselect select $(authselect current --raw) with-systemd-homed with-group-merging --force \
+ && grep -q '^group:.*SUCCESS=merge' /etc/authselect/nsswitch.conf
 
 # Local SELinux policy. The CIL modules in rootfs/usr/share/inglenook/selinux
 # are installed into the policy store (/etc/selinux, so the factory copy below

@@ -129,6 +129,7 @@ fi
 check "bootc knows the registry image" "bootc status --format=json | grep -o '\"image\":\"[^\"]*\"' | head -1" "\"image\":\"$ref\""
 check "the first user was created" 'homectl list --no-legend | awk "{print \$1}"' alice
 check "the user is in wheel and the password works" 'PASSWORD="correct horse battery" homectl with alice -- id alice | grep -o "10(wheel)"' '10(wheel)'
+check "getent group wheel lists the user (merged sources)" 'getent group wheel' 'wheel:x:10:alice'
 check "the user has subordinate ids for rootless podman" 'grep -c "^alice:" /etc/subuid /etc/subgid | tr "\n" " "' '/etc/subuid:1 /etc/subgid:1 '
 check "the credential with the password is gone" 'ls /etc/credstore | wc -l' 0
 [[ $ENCRYPT == 1 ]] && check "the home is a plain directory (the root is encrypted)" 'homectl inspect alice | sed -n "s/^ *Storage: //p"' 'directory (no encryption)'
