@@ -49,6 +49,7 @@ if [[ -z ${NO_IMAGE:-} ]]; then
   cp --reflink=auto "$parts"/* "$WORK/tree/inglenook/"
   echo "${TARGET_IMGREF:-$ref}" > "$WORK/tree/inglenook/target-imgref"
   podman cp "$c:/usr/lib/ostree/prepare-root.conf" "$WORK/tree/inglenook/prepare-root.conf"
+  cp "$HERE/README.stick.txt" "$WORK/tree/inglenook/README.txt"
 fi
 
 content=$(du -sb "$WORK/tree" | cut -f1)
