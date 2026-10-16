@@ -18,16 +18,31 @@ SKIP = ("usr/share/doc", "usr/share/man", "usr/share/info", "usr/share/licenses"
 conflicts, added = [], 0
 
 
+def target(link):
+    """A symlink's target. Links into /etc/alternatives (dig, host, ...) would
+    dangle, because only /usr is taken from the tree; point them at what the
+    alternatives link in the tree points to."""
+    t = os.readlink(link)
+    if t.startswith("/etc/alternatives/") and link.startswith(tree):
+        alt = tree + t
+        if os.path.islink(alt):
+            return os.readlink(alt)
+    return t
+
+
 def same(a, b):
     if os.path.islink(a) or os.path.islink(b):
-        return os.path.islink(a) and os.path.islink(b) and os.readlink(a) == os.readlink(b)
+        if not (os.path.islink(a) and os.path.islink(b)):
+            return False
+        # the boot initrd keeps its alternatives links as they are (it has /etc/alternatives)
+        return os.readlink(a) == os.readlink(b) or target(a) == target(b)
     return filecmp.cmp(a, b, shallow=False)
 
 
 def put(src, dst):
     os.makedirs(os.path.dirname(dst), exist_ok=True)
     if os.path.islink(src):
-        os.symlink(os.readlink(src), dst)
+        os.symlink(target(src), dst)
     else:
         shutil.copy2(src, dst)
 
