@@ -29,6 +29,7 @@ trap 'kill "$(cat qemu.pid)" 2>/dev/null || true' EXIT
 
 T=$'\t'
 "$HERE/serial-shell.py" serial.sock 120 'bash-.*# ' <<CHECKS
+the banner reached the console, whole${T}@console${T}Reboot into the new system:  systemctl reboot
 the shell is root${T}id -un${T}^root\$
 the addon cmdline is appended${T}cat /proc/cmdline${T}rd.systemd.unit=inglenook-installer.target
 the UKI cmdline is still there${T}cat /proc/cmdline${T}composefs=
@@ -36,7 +37,7 @@ we are in the initrd, not the real root${T}findmnt -no FSTYPE /${T}(rootfs|tmpfs
 switch-root never ran${T}systemctl is-active initrd-switch-root.service${T}inactive
 the installer tree is there${T}ls /usr/installer${T}units
 the units are reachable through their symlinks${T}systemctl is-active inglenook-installer.target${T}^active
-the boot medium is one vfat partition${T}udevadm settle; lsblk -no FSTYPE,LABEL /dev/sda1 /dev/sda${T}vfat +INGLENOOK
+the boot medium is one vfat partition${T}for i in \$(seq 30); do [ -b /dev/sda1 ] && break; sleep 1; done; udevadm settle; lsblk -no FSTYPE,LABEL /dev/sda1 /dev/sda${T}vfat +INGLENOOK
 gdisk is installed${T}gdisk --version${T}GPT fdisk
 sgdisk makes a GPT${T}truncate -s 64M /tmp/d.img && sgdisk -o -n 1:0:0 -c 1:x /tmp/d.img >/dev/null && sgdisk -p /tmp/d.img${T}^ +1 +2048 
 util-linux works${T}lsblk --version${T}util-linux

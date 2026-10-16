@@ -5,6 +5,8 @@
 
 Each stdin line is "description<TAB>command<TAB>expected-regex" (a regex that
 must match the command's output). The first line waits for the shell prompt.
+The command "@console" matches the regex against everything the console
+printed before the first prompt (the boot log and any banner).
 Prints "ok   ..." / "FAIL ..." per line; exit 1 if any failed.
 """
 import re, socket, sys, time
@@ -70,16 +72,29 @@ for line in sys.stdin:
     if first:
         # Nudge the (idle) shell once it is up: the prompt may have been printed before we connected.
         ok = False
+        boot_text = ""
         end = time.time() + boot_timeout
         while time.time() < end:
             sock.send(b"\n")
-            if expect(prompt, 3) is not None:
+            before = expect(prompt, 3)
+            if before is not None:
+                boot_text += before
                 ok = True
                 break
         if not ok:
             print(f"FAIL boot: no shell prompt within {boot_timeout:.0f}s; the console ended with:\n{buf[-1500:]}")
             sys.exit(1)
         first = False
+        # Kernel messages would land in the middle of command output.
+        sock.send(b"dmesg -n 1\n")
+        expect(prompt, 5)
+    if cmd == "@console":
+        if re.search(want, boot_text, re.M):
+            print(f"ok   {desc}")
+        else:
+            print(f"FAIL {desc}: want /{want}/ in the console output before the prompt, got {boot_text[-400:]!r}")
+            fail = 1
+        continue
     buf = ""
     sock.send((cmd + '; echo "@@END$?@@"\n').encode())
     out = expect(r"^@@END\d+@@$", 60)
