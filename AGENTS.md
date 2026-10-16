@@ -22,6 +22,7 @@ images/
   build.sh       # buildah wrapper: pre -> mkosi initrd -> base -> composefs digest -> UKI image
   initrd/        # mkosi config for the initrd (replaces dracut): mkosi.conf + mkosi.extra/
   rootfs/        # Files copied into the image as-is (units, drop-ins, issue banner)
+  installer/     # The installer stick: UKI addon (tools + inglenook-install under /usr/installer), stick.sh, mkosi.conf of its packages; see docs/installer.md
   usb.sh         # Build a raw disk image for a physical machine / USB stick (build/usb); live installer by default
   live-addon.sh  # Build the ESP-only UKI addon that makes a stick live (ro, no fsck, inglenook.live=1)
   test/          # Rootless QEMU/KVM tests: vm.sh (harness), smoke.sh, wipe.sh, xfsvar.sh; work dirs under build/
@@ -37,6 +38,7 @@ docs/            # On-demand reference docs — read when relevant (see below)
 | Stateless-boot test      | `./images/test/wipe.sh` (after smoke.sh: wipes /etc and /var, boots twice, checks SELinux and the journal) |
 | Encrypted /var test      | `./images/test/xfsvar.sh` (installs with `--root-size`, grows the disk, checks the LUKS2 root and the encrypted XFS /var after two boots) |
 | Live-stick test          | `./images/test/live.sh` (live addon on the ESP; /etc and /var in RAM; nothing written to the stick) |
+| Installer stick (no live mode) | `images/installer/stick.sh <image-ref>` builds `build/installer/stick.img` (one FAT32 partition, see docs/installer.md); tests: `images/test/installer-env.sh`, `install-from-stick.sh` (whole install onto a disk with old data, stick pulled, boot from the disk), `install-safety.sh` (refusals, disk untouched) |
 | Hardware-token login test | `./images/test/token.sh` (software FIDO2 token in the VM: homed users, run0's polkit stack, pam-u2f, ssh; see docs/tokens.md) |
 | Install-to-NVMe flow test | `./images/test/nvme-install.sh` (live stick as USB + blank virtual NVMe; the documented install; boot from the NVMe) |
 | SELinux denials of a boot | `images/test/vm.sh avc` (summary) / `new-avc` (not in the baseline); on the machine: `ausearch -m avc` as root |
@@ -112,6 +114,8 @@ docs/            # On-demand reference docs — read when relevant (see below)
 
 23. **Token logins** (docs/tokens.md): authselect has `with-systemd-homed` (set in the Containerfile, so `pam_systemd_home` is in `system-auth`), `pam-u2f` is installed but `with-pam-u2f` is off, and `sshd_config.d/20-systemd-homed.conf` reads keys from homed records. Never add `AuthenticationMethods publickey,password` to sshd (locks out root and token-only users). A homed user's ssh login needs the token in the *server*. `images/test/token.sh` drives `softfido.py`, a small software CTAP2 authenticator over uhid; it checks the wiring, not real YubiKeys. Pitfalls: `homectl create` always asks for a password (remove it afterwards with `images/test/token/nopw.sh`), `$PIN` is ignored (answer the ask-password queue), and `pkill -f` matches your own ssh command line.
 
+23. **The installer (docs/installer.md)** runs in the initrd of the stick's own UKI, selected by the addon's `rd.systemd.unit=`. It is `bootc install to-filesystem` without a container: `--source-imgref oci:<dir>` skips bootc's container check, and `/etc/ostree/prepare-root.conf` must exist (the script copies the image's own from the stick; `/usr` is read-only there). The archive is extracted to a scratch partition on the target disk, never RAM; the stick is unmounted right after and can be pulled. Test commands go to an *interactive* bash over the serial console, so `!!` expands as history: never print or grep `!!!`. `systemd-repart` makes the root (`SYSTEMD_REPART_MKFS_OPTIONS_EXT4='-O verity'`, `Encrypt=tpm2`); do not seal TPM keys to PCR 12 (the addon changes it). `bootc-generic-growpart.service` of the base image is masked (it grew a plain root in VMs only). Do not put a TPM-presence test on `systemd-tpm2-setup-early`'s SRK file or `systemd-analyze has-tpm2`: the test VM's boot is not measured, so both say no/partial while the TPM works; use `/dev/tpmrm0` after `After=tpm2.target`.
+
 ## Adding New Components
 
 - **New package/tool**: add it to `images/Containerfile` (respecting layer-cache ordering), rebuild, and verify the bootc labels survived (e.g. `skopeo inspect --config ghcr.io/snugmo/inglenook:<tag> | jq .config.Labels`).
@@ -123,6 +127,7 @@ This file holds only the context useful for *any* work in this repo. As the imag
 
 - **docs/usb.md** — building, writing and trying the USB stick image on a physical machine (logins, what was verified, known limits).
 - **docs/tokens.md** — hardware-token logins: homed + FIDO2/PKCS#11, pam-u2f, what was tested with the software token and the limits.
+- **docs/installer.md** — the installer stick: one FAT32 partition, the UKI addon, `inglenook-install`, the tests (replaces the live stick; usb.md/install.md still describe the live one).
 - **docs/install.md** — installing to the internal drive from the stick (partitioning, ESP, composefs, persistent XFS `/var`).
 
 Planned (to be created when needed):
