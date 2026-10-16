@@ -62,6 +62,7 @@ nvme-cli works${T}nvme version${T}nvme version
 pciutils works${T}lspci --version${T}lspci version
 attr works${T}getfattr --version${T}getfattr
 acl works${T}getfacl --version${T}getfacl
+libselinux-utils works${T}getsebool -h 2>&1${T}[Uu]sage
 tpm2-tools works${T}tpm2_getcap --version${T}tpm2_getcap
 bind-utils works${T}dig -v 2>&1${T}DiG
 git-core works${T}git --version${T}git version
