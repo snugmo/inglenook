@@ -1,0 +1,9 @@
+#!/bin/sh
+# The installer's console shell (inglenook-shell.service): the banner, then a
+# root shell. Not sulogin: with SYSTEMD_SULOGIN_FORCE it still prints its
+# "rescue mode" text and waits for Enter.
+cat /usr/installer/motd
+# A serial line is slow and the tty layer drops what is still queued when the
+# shell resets the terminal; rewriting the settings waits for the output to drain.
+stty "$(stty -g)"
+exec /usr/bin/bash

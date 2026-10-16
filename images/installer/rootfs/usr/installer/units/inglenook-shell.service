@@ -5,13 +5,13 @@ After=basic.target
 Conflicts=shutdown.target
 Before=shutdown.target
 
-# Like rescue.service, but straight to a root shell: this is a stick that is
-# only ever booted to install, so there is no root password to ask for.
+# Like rescue.service, but straight to a root shell with a banner: this is a
+# stick that is only ever booted to install, so there is no root password to ask for.
 [Service]
 Environment=HOME=/root
-Environment=SYSTEMD_SULOGIN_FORCE=1
 WorkingDirectory=-/root
-ExecStart=-/usr/lib/systemd/systemd-sulogin-shell rescue
+# the banner comes back after every exit of the shell (Restart=always)
+ExecStart=/usr/installer/bin/shell
 Type=idle
 Restart=always
 RestartSec=0
