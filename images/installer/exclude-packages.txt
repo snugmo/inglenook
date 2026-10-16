@@ -1,0 +1,11 @@
+# Packages that mkosi.conf's packages pull in but that the installer never runs.
+# They stay installed in the build tree (so dependencies resolve), but none of
+# their files go into the overlay; see overlay.py. One package per line.
+
+# bootc requires podman; `bootc install to-filesystem` only needs skopeo here.
+podman
+netavark
+aardvark-dns
+passt
+crun
+conmon

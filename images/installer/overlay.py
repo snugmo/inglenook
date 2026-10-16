@@ -2,16 +2,18 @@
 """Assemble the installer overlay: the /usr of the mkosi package tree minus
 everything the boot initrd already has, plus the hand-written rootfs/ tree.
 
-  overlay.py <mkosi-tree> <boot-initrd-dir> <rootfs-dir> <out-dir>
+  overlay.py <mkosi-tree> <boot-initrd-dir> <rootfs-dir> <out-dir> [<excluded-files>]
 
 Both initrds are unpacked over each other at boot, so a file present in both
 must be identical; one that differs (a different library build, say) would
 silently replace the boot initrd's copy, so it is an error here. Docs, man
-pages, locales, debug links, gdb helpers, shell completions and the rpm database are left out.
+pages, locales, debug links, gdb helpers, shell completions and the rpm database are left out,
+and so is every path listed (one per line, relative to the root) in <excluded-files>.
 """
 import filecmp, os, shutil, sys
 
 tree, initrd, rootfs, out = sys.argv[1:5]
+excluded = set(open(sys.argv[5]).read().split()) if len(sys.argv) > 5 else set()
 SKIP = ("usr/share/doc", "usr/share/man", "usr/share/info", "usr/share/licenses", "usr/share/locale",
         "usr/lib/locale", "usr/lib/sysimage", "usr/lib/rpm", "usr/lib/.build-id",
         "usr/share/gcc", "usr/share/gdb", "usr/share/bash-completion", "usr/share/zsh")  # prefixes
@@ -53,6 +55,8 @@ for root, dirs, files in os.walk(os.path.join(tree, "usr")):
     # a symlinked directory is an entry like a file
     for name in files + [d for d in dirs if os.path.islink(os.path.join(root, d))]:
         r = os.path.join(rel, name)
+        if r in excluded:
+            continue
         src, have = os.path.join(root, name), os.path.join(initrd, r)
         if os.path.lexists(have):
             if os.path.isdir(have) and not os.path.islink(have):
