@@ -57,9 +57,13 @@ docs/            # On-demand reference docs — read when relevant (see below)
 
 ### Commit Conventions
 
-- Make small, logically contained commits; one per meaningful change, committed as you go.
-- Prefix every commit subject with a single emoji representing the change, followed by the conventional type prefix used in this repo (`feat:`, `chore:`, `docs:`, `fix:`, `refactor:`, …); keep subjects under 72 characters. Use `feat:` when the change adds a new capability to the image (a new package, tool, or service), and `chore:` for maintenance such as version bumps and internal adjustments. Examples: `✨ feat: add Rust toolchain to OS image`, `📦 chore: update Fedora base from 44 to 45`, `✏️ docs: …`, `🐛 fix: …`.
-- End commit messages with an `Assisted-by: <agent>:<model>` trailer, where `<agent>` is the coding agent doing the committing (no "generated with" line).
+- Small commits, one per meaningful change, committed as you go.
+- Subject: `<emoji> <type>: <summary>` — a conventional type prefix
+  (`feat:`, `fix:`, `chore:`, `docs:`, …) and a summary under 72 chars.
+  The single emoji is chosen per change to capture what actually changed;
+  there is no fixed set of allowed emojis.
+- End the message with an `Assisted-by: <agent>:<model>` trailer (no
+  "generated with" line).
 
 ### OS Image (`Containerfile`)
 
