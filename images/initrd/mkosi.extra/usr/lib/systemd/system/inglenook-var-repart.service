@@ -2,9 +2,6 @@
 Description=Create the XFS /var partition in the free space after the root
 DefaultDependencies=no
 ConditionKernelCommandLine=inglenook.var=xfs
-# Not on a live stick, whose /var is RAM and whose disk must stay untouched; the
-# flag in the UKI is for the system the stick installs.
-ConditionKernelCommandLine=!inglenook.live
 ConditionPathExists=/etc/initrd-release
 # Without a TPM there is nothing to seal the volume to: skip cleanly (/var stays on the
 # root) instead of failing. After=tpm2.target and no Wants=: systemd-tpm2-generator hooks
