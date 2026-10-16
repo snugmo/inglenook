@@ -32,7 +32,11 @@ mkdir -p "$tmp/initrd"
 (cd "$tmp/initrd" && zstd -dc "$INITRD" | cpio -id --quiet --no-absolute-filenames 'usr/*' 2>/dev/null) || true
 mkosi --directory "$HERE" --force --output-directory "$tmp/mkosi" >"$tmp/mkosi.log" 2>&1 \
   || { cat "$tmp/mkosi.log" >&2; exit 1; }
-python3 -I "$HERE/overlay.py" "$tmp/mkosi/installer" "$tmp/initrd" "$HERE/rootfs" "$tmp/overlay"
+# Files of the packages in exclude-packages.txt (dependencies the installer never runs).
+grep -vE '^(#|$)' "$HERE/exclude-packages.txt" | while read -r pkg; do
+  rpm --root "$tmp/mkosi/installer" --dbpath /usr/lib/sysimage/rpm -ql "$pkg" | sed 's#^/##'
+done > "$tmp/excluded"
+python3 -I "$HERE/overlay.py" "$tmp/mkosi/installer" "$tmp/initrd" "$HERE/rootfs" "$tmp/overlay" "$tmp/excluded"
 
 # Stable order, root ownership regardless of who builds.
 [[ -n ${LIST_OVERLAY:-} ]] && (cd "$tmp/overlay" && find . -type f -o -type l | sort) >&2
