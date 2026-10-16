@@ -11,7 +11,8 @@ if [ -e /mnt/share/debugcmd ]; then
   sync; systemctl poweroff -f
 fi
 IMG=$(cat /mnt/share/imgref)
-podman rmi -f "$IMG" || true
+# Every image of an earlier run goes: the disk is small, and a stale tag must never be installed.
+podman rmi -a -f || true
 podman load -i /mnt/share/inglenook.oci
 # ROOT_SIZE (optional, from vm.sh install): leave free space after the root.
 ROOT_SIZE=$(cat /mnt/share/rootsize 2>/dev/null)
