@@ -7,14 +7,14 @@ everything the boot initrd already has, plus the hand-written rootfs/ tree.
 Both initrds are unpacked over each other at boot, so a file present in both
 must be identical; one that differs (a different library build, say) would
 silently replace the boot initrd's copy, so it is an error here. Docs, man
-pages, locales, debug links, gdb helpers and the rpm database are left out.
+pages, locales, debug links, gdb helpers, shell completions and the rpm database are left out.
 """
 import filecmp, os, shutil, sys
 
 tree, initrd, rootfs, out = sys.argv[1:5]
 SKIP = ("usr/share/doc", "usr/share/man", "usr/share/info", "usr/share/licenses", "usr/share/locale",
         "usr/lib/locale", "usr/lib/sysimage", "usr/lib/rpm", "usr/lib/.build-id",
-        "usr/share/gcc", "usr/share/gdb")  # prefixes
+        "usr/share/gcc", "usr/share/gdb", "usr/share/bash-completion", "usr/share/zsh")  # prefixes
 conflicts, added = [], 0
 
 
