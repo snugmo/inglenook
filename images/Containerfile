@@ -103,7 +103,7 @@ RUN rm -f /etc/dnf/protected.d/{grub2-efi-x64,grub2-pc,grub2-tools-minimal,shim,
 # capabilities (newuidmap, newgidmap, arping) are not setuid and stay; setgid
 # files are left as they are. smoke.sh fails on any setuid file.
 RUN find /usr -xdev -type f -perm -4000 -exec chmod u-s {} + \
- && systemctl enable polkit-agent-helper.socket
+ && systemctl enable polkit-agent-helper.socket systemd-homed-firstboot.service
 
 # The base image's bootc-generic-growpart.service grows the root partition to the end of the
 # disk, but only in a VM and only for a plain partition (not LUKS). The installer chooses the

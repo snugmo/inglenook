@@ -10,7 +10,8 @@
 
   It finds the image on the stick, shows you each disk and what is on it, asks
   for the size of the root (the rest of the disk becomes /var), encrypts the
-  disk with the TPM, installs, and tells you when to unplug the stick.
+  disk with the TPM, asks for the first user (root is locked, so without one
+  nobody can log in), installs, and tells you when to unplug the stick.
 
   Looking around first:  lsblk -o NAME,SIZE,MODEL,TRAN,FSTYPE,LABEL
   Tools: gdisk sgdisk cryptsetup systemd-cryptenroll systemd-repart tpm2_*

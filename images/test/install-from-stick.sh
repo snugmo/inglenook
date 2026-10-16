@@ -82,7 +82,7 @@ bad() { echo "FAIL $1"; fail=1; }
 
 echo "installer VM: waiting for the shell"
 run 240 'echo 1 > /proc/sys/kernel/printk; for i in $(seq 60); do blkid -L INGLENOOK && break; sleep 1; done' >/dev/null
-run 20 "(INSTALL_DISK=/dev/vda INSTALL_ROOT_SIZE=${ROOT_SIZE:-8G} INSTALL_ENCRYPT=$([[ $ENCRYPT == 1 ]] && echo tpm2 || echo none) INSTALL_RECOVERY_KEY=0 INSTALL_YES=1 INSTALL_NO_REBOOT=1 setsid inglenook-install > /tmp/install.log 2>&1 &)" >/dev/null
+run 20 "(INSTALL_DISK=/dev/vda INSTALL_ROOT_SIZE=${ROOT_SIZE:-8G} INSTALL_ENCRYPT=$([[ $ENCRYPT == 1 ]] && echo tpm2 || echo none) INSTALL_RECOVERY_KEY=0 INSTALL_USER=alice INSTALL_REALNAME='Alice Example' INSTALL_USER_PASSWORD='correct horse battery' INSTALL_YES=1 INSTALL_NO_REBOOT=1 setsid inglenook-install > /tmp/install.log 2>&1 &)" >/dev/null
 run 900 'until grep -q "no longer needed" /tmp/install.log; do sleep 1; if grep -q "^ERROR:" /tmp/install.log; then break; fi; done; grep -c "no longer needed" /tmp/install.log' | tail -1 | grep -q '^1' \
   && ok "the image was extracted from the stick" || bad "the install never got past the image extraction"
 
@@ -92,8 +92,8 @@ sleep 3
 n=$(run 30 'udevadm settle; lsblk -dno TRAN | grep -c usb || true' | tail -1)
 [[ $n == 0 ]] && ok "the stick is gone from the installer" || bad "the stick is still there ($n)"
 
-run 900 'until grep -qE "Installation complete|^ERROR:" /tmp/install.log; do sleep 2; done; grep -E "^==>|^ERROR:|^WARNING:|Installation complete" /tmp/install.log' | tee phases.txt
-grep -q "Installation complete" phases.txt && ok "inglenook-install finished without the stick" || { bad "the install did not finish"; run 30 'tail -40 /tmp/install.log' ; }
+run 900 'until grep -qE "^==> Installation complete[.]|^ERROR:" /tmp/install.log; do sleep 2; done; grep -E "^==>|^ERROR:|^WARNING:|^    credential:|Installation complete[.]" /tmp/install.log' | tee phases.txt
+grep -q "^==> Installation complete[.]" phases.txt && ok "inglenook-install finished without the stick" || { bad "the install did not finish"; run 30 'tail -40 /tmp/install.log' ; }
 # (ACPI powerdown does nothing here: the initrd has no logind to handle the button)
 run 20 '(setsid systemctl poweroff >/dev/null 2>&1 &)' >/dev/null || true
 for _ in $(seq 60); do kill -0 "$(cat qemu.pid)" 2>/dev/null || break; sleep 1; done
@@ -108,6 +108,9 @@ mv "$IWORK/target.img" "$B/target.img"
 [[ $ENCRYPT == 1 ]] && cp -r "$IWORK/tpm" "$B/tpm"
 cp "$KEY" "$B/key"; ssh-keygen -y -f "$B/key" > "$B/key.pub"; chmod 600 "$B/key"
 [[ $ENCRYPT == 1 ]] || export TPM=0
+# The first-boot wizard of homed must run (it creates the user from the credential), so no
+# systemd.firstboot=no; the disk-encryption wizard asks on a console nobody answers.
+export VM_FIRSTBOOT=1 VM_CMDLINE="inglenook.cryptenroll=no"
 echo "boot: the installed disk alone"
 "$vm" start net
 "$vm" wait
@@ -124,7 +127,15 @@ if [[ $ENCRYPT == 1 ]]; then
   check "/var is xfs" 'stat -f -c %T /var' xfs
 fi
 check "bootc knows the registry image" "bootc status --format=json | grep -o '\"image\":\"[^\"]*\"' | head -1" "\"image\":\"$ref\""
+check "the first user was created" 'homectl list --no-legend | awk "{print \$1}"' alice
+check "the user is in wheel and the password works" 'PASSWORD="correct horse battery" homectl with alice -- id alice | grep -o "10(wheel)"' '10(wheel)'
+check "the credential with the password is gone" 'ls /etc/credstore | wc -l' 0
+[[ $ENCRYPT == 1 ]] && check "the home is a plain directory (the root is encrypted)" 'homectl inspect alice | sed -n "s/^ *Storage: //p"' 'directory (no encryption)'
 check "no failed units" 'systemctl --failed --no-legend | wc -l' 0
 check "no journal errors" 'journalctl -b -p err --no-pager -q | grep -avE "virt/tdx|tpm tpm0: A TPM error \(256\)" | cut -c1-200 | head -5' ''
 "$vm" new-avc || fail=1
+# last: a failed password makes homed ask again, which starts the ask-password agents and logs
+# (plymouth is not in the image: 'systemd-ask-password-plymouth.path not loaded', one net_admin denial)
+# homectl answers a wrong password with this message and then waits for another try: cap it
+check "a wrong password is refused" 'timeout 15 env PASSWORD=wrong homectl --no-ask-password with alice -- true </dev/null 2>&1 | grep -o "Password incorrect"' 'Password incorrect'
 exit $fail
