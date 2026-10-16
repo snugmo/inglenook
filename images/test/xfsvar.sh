@@ -59,4 +59,24 @@ echo "boot 2: the partition exists; data survives"
 "$vm" wait
 checks
 check "data on /var survived the reboot" 'cat ~/marker' kept
+"$vm" stop
+
+# No TPM: nothing to seal the volume to. The initrd must skip the var service (not fail), /var
+# stays on the root, and the root keeps its size (a VM used to grow it over the free space with
+# the base image's bootc-generic-growpart.service, now masked).
+echo "no TPM: /var stays on the root, the root does not grow"
+export TPM=0
+BLOCK_SETUP=direct ROOT_SIZE=8G TARGET_SIZE=14G "$vm" install "$ref"
+truncate -s "${DISK_SIZE:-20G}" "$WORK/target.img"
+"$vm" start vsock
+"$vm" wait
+check "/var is not xfs" 'test "$(stat -f -c %T /var)" != xfs && echo yes' yes
+check "there is no var partition" 'test -e /dev/disk/by-partlabel/var && echo yes || echo no' no
+check "the root keeps its size" 'lsblk -bno SIZE "$(findmnt -rno SOURCE /sysroot)" | awk "{print (\$1 < 9*2^30) ? \"small\" : \"grown\"}"' small
+check "the root grow service is masked" 'systemctl is-enabled bootc-generic-growpart.service 2>&1' masked
+check "the initrd skipped the var service" 'journalctl -b -o cat --no-pager | grep -q "Create the XFS /var partition.*skipped, unmet condition check ConditionPathExists=/dev/tpmrm0" && echo yes' yes
+check "selinux mode is $expect_mode" 'getenforce' "$expect_mode"
+"$vm" new-avc || fail=1
+check "no failed units" 'systemctl --failed --no-legend | wc -l' 0
+check "no journal errors" 'journalctl -b -p err --no-pager -q | grep -avE "virt/tdx|tpm tpm0: A TPM error \(256\)" | cut -c1-200 | head -5' ''
 exit $fail
