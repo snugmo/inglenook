@@ -1,22 +1,24 @@
 #!/usr/bin/env bash
-# Install from the installer stick without a container, end to end in QEMU:
-# build the one-partition FAT32 stick with the image as a split oci-archive,
-# boot it (USB, under OVMF, with a software TPM and a blank disk), run the
-# install procedure (installer-bootc-steps.sh) in the initrd's root shell, pull
-# the stick out as soon as the image is extracted, then boot the installed disk
-# alone and check it.
+# The guided install from the installer stick, end to end in QEMU: build the
+# one-partition FAT32 stick (images/installer/stick.sh, with the image as a split
+# oci-archive), boot it (USB, under OVMF, with a software TPM and a blank disk),
+# run inglenook-install in the initrd's root shell with its questions answered
+# through the environment, pull the stick out as soon as it says the stick is
+# no longer needed, then boot the installed disk alone and check it.
 #
-#   images/test/installer-bootc.sh [image-ref]    (default: the newest ghcr.io/snugmo/inglenook)
+#   images/test/install-from-stick.sh [image-ref]    (default: the newest ghcr.io/snugmo/inglenook)
 #
 # Environment: ENCRYPT=0 (plain root instead of LUKS2 + TPM2), RAM (installer VM
 # memory, default 4G), KEY (ssh key the image trusts, default build/xfsvar/key,
 # the one the image of images/test/xfsvar.sh has baked in), STICK_REUSE=1 (keep
-# the stick of the last run), WORK (default build/installer-bootc).
+# the stick of the last run), WORK (default build/install-from-stick),
+# ROOT_SIZE (default 8G; the rest of the disk becomes /var), OLD_DATA=0 (a blank target
+# disk; by default it holds an old filesystem and partitions, which the install wipes).
 set -euo pipefail
 
 HERE=$(cd "$(dirname "$0")" && pwd)
 REPO=$(cd "$HERE/../.." && pwd)
-IWORK=${WORK:-$REPO/build/installer-bootc}   # the installer VM; the installed disk is booted from $IWORK-boot
+IWORK=${WORK:-$REPO/build/install-from-stick}   # the installer VM; the installed disk is booted from $IWORK-boot
 B=$IWORK-boot
 export WORK=$IWORK
 OVMF=/usr/share/OVMF
@@ -39,28 +41,20 @@ cleanup() {
 }
 trap cleanup EXIT
 
-# --- the image as a split oci-archive (cached per image id), and the stick ---
-id=$(podman image inspect --format '{{.Id}}' "$ref")
-parts=$WORK/parts-${id:0:12}
-if [[ ! -f $parts/SHA256SUMS ]]; then
-  rm -rf "$parts"; mkdir -p "$parts"
-  skopeo copy --quiet "containers-storage:$ref" "oci-archive:$parts/archive.tar:latest"
-  split -b 1G -d -a 3 "$parts/archive.tar" "$parts/image.oci.tar."
-  rm -f "$parts/archive.tar"
-  (cd "$parts" && sha256sum image.oci.tar.* > SHA256SUMS)
-fi
+# --- the stick (stick.sh puts the image on it) ---
 if [[ -z ${STICK_REUSE:-} || ! -f stick.img ]]; then
-  STICK_SIZE=${STICK_SIZE:-3G} "$REPO/images/installer/stick.sh" "$ref" >/dev/null
-  off=1048576   # stick.sh: partition 1 starts at 1 MiB
-  export MTOOLS_SKIP_CHECK=1
-  mmd -i "stick.img@@$off" ::inglenook ::test
-  mcopy -i "stick.img@@$off" "$parts"/* ::inglenook/
-  mcopy -i "stick.img@@$off" "$HERE/installer-bootc-steps.sh" ::test/steps.sh
+  WORK=$WORK "$REPO/images/installer/stick.sh" "$ref" >/dev/null
 fi
 
 # --- the installer VM ---
 rm -rf tpm target.img serial.sock qmp.sock tpm.sock qemu.pid
 truncate -s "${TARGET_SIZE:-16G}" target.img
+# Old data to be wiped: a labeled ext4 right where the new ESP will start (1 MiB) and an old
+# 'root' partition after it. OLD_DATA=0 for a blank disk.
+if [[ ${OLD_DATA:-1} == 1 ]]; then
+  printf 'label: gpt\nstart=1MiB, size=1GiB, type=L, name=olddata\nstart=2GiB, size=1GiB, type=L, name=root\n' | sfdisk -q target.img
+  mke2fs -q -F -t ext4 -L olddata -E offset=1048576 target.img 1048576
+fi
 tpm=()
 if [[ $ENCRYPT == 1 ]]; then
   swtpm=swtpm
@@ -87,9 +81,9 @@ ok() { echo "ok   $1"; }
 bad() { echo "FAIL $1"; fail=1; }
 
 echo "installer VM: waiting for the shell"
-run 240 'echo 1 > /proc/sys/kernel/printk; for i in $(seq 60); do blkid -L INGLENOOK && break; sleep 1; done; mkdir -p /mnt/t && mount -o ro "$(blkid -L INGLENOOK)" /mnt/t && cp /mnt/t/test/steps.sh /tmp/steps.sh && umount /mnt/t' >/dev/null
-run 20 "(TARGET_IMGREF='$ref' ENCRYPT=$ENCRYPT setsid bash /tmp/steps.sh > /tmp/install.log 2>&1 &)" >/dev/null
-run 900 'until grep -q "STICK-FREE" /tmp/install.log; do sleep 1; if grep -q "^Error\|exited" /tmp/install.log; then break; fi; done; grep -c STICK-FREE /tmp/install.log' | tail -1 | grep -q '^1' \
+run 240 'echo 1 > /proc/sys/kernel/printk; for i in $(seq 60); do blkid -L INGLENOOK && break; sleep 1; done' >/dev/null
+run 20 "(INSTALL_DISK=/dev/vda INSTALL_ROOT_SIZE=${ROOT_SIZE:-8G} INSTALL_ENCRYPT=$([[ $ENCRYPT == 1 ]] && echo tpm2 || echo none) INSTALL_RECOVERY_KEY=0 INSTALL_YES=1 INSTALL_NO_REBOOT=1 setsid inglenook-install > /tmp/install.log 2>&1 &)" >/dev/null
+run 900 'until grep -q "no longer needed" /tmp/install.log; do sleep 1; if grep -q "^ERROR:" /tmp/install.log; then break; fi; done; grep -c "no longer needed" /tmp/install.log' | tail -1 | grep -q '^1' \
   && ok "the image was extracted from the stick" || bad "the install never got past the image extraction"
 
 echo "pulling the stick (QMP device_del)"
@@ -98,9 +92,8 @@ sleep 3
 n=$(run 30 'udevadm settle; lsblk -dno TRAN | grep -c usb || true' | tail -1)
 [[ $n == 0 ]] && ok "the stick is gone from the installer" || bad "the stick is still there ($n)"
 
-run 900 'until grep -qE "INSTALL-DONE|^error|Error" /tmp/install.log; do sleep 2; done; grep -E "^PHASE|INSTALL-DONE|^error|Installation complete" /tmp/install.log' | tee phases.txt
-grep -q INSTALL-DONE phases.txt && ok "bootc installed without the stick" || { bad "the install did not finish"; run 30 'tail -30 /tmp/install.log' ; }
-run 30 "awk '{ if (min==\"\" || \$2<min) min=\$2; if (\$3>root) root=\$3 } END { print \"min available RAM \" min \" MB, RAM-backed root peak \" root \" MB\" }' /tmp/mem.log" | tail -1 | tee mem.txt
+run 900 'until grep -qE "Installation complete|^ERROR:" /tmp/install.log; do sleep 2; done; grep -E "^==>|^ERROR:|^WARNING:|Installation complete" /tmp/install.log' | tee phases.txt
+grep -q "Installation complete" phases.txt && ok "inglenook-install finished without the stick" || { bad "the install did not finish"; run 30 'tail -40 /tmp/install.log' ; }
 # (ACPI powerdown does nothing here: the initrd has no logind to handle the button)
 run 20 '(setsid systemctl poweroff >/dev/null 2>&1 &)' >/dev/null || true
 for _ in $(seq 60); do kill -0 "$(cat qemu.pid)" 2>/dev/null || break; sleep 1; done
@@ -122,6 +115,7 @@ check() { # description command expected (as root)
   local got; got=$(SSH_USER=root "$vm" ssh "$2" 2>&1 || true)
   if [[ $got == "$3" ]]; then ok "$1"; else echo "FAIL $1: got '$got', want '$3'"; fail=1; fi
 }
+check "the old data is gone" 'lsblk -rno LABEL,PARTLABEL /dev/vda | grep -cE "olddata"' 0
 check "running from the disk" 'lsblk -srno NAME "$(findmnt -no SOURCE /sysroot)" | grep -cx vda' 1
 if [[ $ENCRYPT == 1 ]]; then
   check "the root is LUKS2" 'cryptsetup status root | sed -n "s/^ *type: *//p"' LUKS2

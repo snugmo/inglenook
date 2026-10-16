@@ -15,7 +15,7 @@ export WORK
 OVMF=/usr/share/OVMF
 ref=${1:-$(podman images --sort created --format '{{.Repository}}:{{.Tag}}' ghcr.io/snugmo/inglenook | awk 'NR==1')}
 
-"$REPO/images/installer/stick.sh" "$ref"
+NO_IMAGE=1 "$REPO/images/installer/stick.sh" "$ref"
 
 cd "$WORK"
 cp "$OVMF/OVMF_VARS.fd" vars.fd
@@ -29,7 +29,7 @@ trap 'kill "$(cat qemu.pid)" 2>/dev/null || true' EXIT
 
 T=$'\t'
 "$HERE/serial-shell.py" serial.sock 120 'bash-.*# ' <<CHECKS
-the banner reached the console, whole${T}@console${T}Reboot into the new system:  systemctl reboot
+the banner reached the console, whole${T}@console${T}inglenook-install
 the shell is root${T}id -un${T}^root\$
 the addon cmdline is appended${T}cat /proc/cmdline${T}rd.systemd.unit=inglenook-installer.target
 the UKI cmdline is still there${T}cat /proc/cmdline${T}composefs=
@@ -69,4 +69,6 @@ bind-utils works${T}dig -v 2>&1${T}DiG
 git-core works${T}git --version${T}git version
 skopeo works${T}skopeo --version${T}skopeo version
 skopeo has a default signature policy${T}test -s /usr/share/containers/policy.json -o -s /etc/containers/policy.json && echo has-policy${T}^has-policy
+the install script is on the PATH${T}command -v inglenook-install${T}inglenook-install
+efibootmgr is there${T}command -v efibootmgr${T}efibootmgr
 CHECKS
