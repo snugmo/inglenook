@@ -48,7 +48,9 @@ Boot the stick (the console shows a banner), then run `inglenook-install`. It:
    which the installed system's initrd creates on its first boot);
 4. encrypts with the TPM if there is one (`/dev/tpmrm0`), offering a recovery key; without a
    TPM it asks before installing unencrypted;
-5. wipes the disk, partitions it with `systemd-repart` (`/usr/installer/repart.d/00-esp.conf` plus
+5. asks for the **first user** (below), because root is locked and there is no other account, so
+   without one nobody could log in;
+6. wipes the disk, partitions it with `systemd-repart` (`/usr/installer/repart.d/00-esp.conf` plus
    a root and a temporary scratch partition written at run time: ext4 with fs-verity, `Encrypt=tpm2`),
    unpacks the image from the stick to the scratch partition, says the stick is no longer needed,
    runs `bootc install to-filesystem` straight from the initrd (no container), adds a firmware boot
@@ -56,18 +58,47 @@ Boot the stick (the console shows a banner), then run `inglenook-install`. It:
    unplugged before the reboot.
 
 Questions whose answer is in the environment are not asked (`INSTALL_DISK`, `INSTALL_ROOT_SIZE`,
-`INSTALL_ENCRYPT=tpm2|none`, `INSTALL_RECOVERY_KEY`, `INSTALL_YES=1`, `INSTALL_NO_REBOOT=1`,
+`INSTALL_ENCRYPT=tpm2|none`, `INSTALL_RECOVERY_KEY`, `INSTALL_USER`, `INSTALL_REALNAME`,
+`INSTALL_USER_PASSWORD`, `INSTALL_NO_USER=1`, `INSTALL_YES=1`, `INSTALL_NO_REBOOT=1`,
 `INSTALL_TARGET_IMGREF`, `INSTALL_IMAGE_DIR`); the tests use that.
 
 Measured in QEMU: about 45 s for the install itself, 276 MB peak in the RAM-backed root; it works
 with 2 GB of RAM (1 GB is not safe).
+
+## The first user
+
+A fresh install has a locked root account and no usable regular account (the dev account `user` is
+locked; its only way in is the ssh key that `build.sh` bakes in), so the installer sets up one
+systemd-homed account:
+
+- **In the installer:** username, full name (optional) and a password (twice, at least 8 characters).
+  After `bootc install` it writes a `home.create.<name>` credential, a homed JSON user record, into the
+  new system's `/etc/credstore` (that is under `/state/deploy/<digest>/etc` on the root, so it is on the
+  encrypted volume, mode 0600, SELinux-labeled with `setfiles` like the initrd does). The record is in
+  the `wheel` group (so `run0` works), has `/bin/bash` as shell, and holds the password hash plus the
+  password itself in its `secret` section: homed needs the secret to create a home.
+- **On the first boot:** `systemd-homed-firstboot.service` (enabled in the image, drop-in
+  `10-inglenook.conf`) runs `homectl firstboot`, which creates the account from the credential without
+  asking, and the drop-in deletes the credential afterwards. The unit does not use
+  `ConditionFirstBoot=`: the image ships an empty `/etc/machine-id`, which systemd treats as "not a first
+  boot" (machine-id(5)); it runs while homed has no record. The home is a plain directory when the root
+  is encrypted (it already is), homed's default (a LUKS image) when it is not.
+- **Skipped in the installer:** the same service would prompt on the console (username, password; the
+  account joins `wheel`), but `homectl firstboot` only prompts when no regular user exists, and the
+  dev account `user` (UID 1000, locked) counts as one. **Today a machine installed without a first user
+  has no login**, so do not skip the step. Removing `user` from the image fixes that (see AGENTS.md,
+  gotcha 24). To add users later from an existing login: `homectl create <name> --member-of=wheel`.
+- Without disk encryption the password sits on the unencrypted disk in `/etc/credstore` until the first
+  boot deletes the file (and stays recoverable from free space); the installer warns about that.
+- Tokens (FIDO2, PKCS#11) for the account: [tokens.md](tokens.md).
 
 ## Tests
 
 - `images/test/installer-env.sh`: the addon on a stick without the image: root shell in the initrd,
   banner, every installer tool runs.
 - `images/test/install-from-stick.sh`: the whole install onto a disk that holds old data, TPM-sealed
-  root, the stick pulled over QMP as soon as it is no longer needed, then the disk booted alone.
+  root and a first user, the stick pulled over QMP as soon as it is no longer needed, then the disk booted
+  alone: the account exists, is in `wheel`, takes the password and not a wrong one, and the credential is gone.
 - `images/test/install-safety.sh`: everything `inglenook-install` does before it erases: what it shows,
   the typed confirmation, bad sizes, a non-disk, and that the disk is byte-for-byte unchanged afterwards.
 
@@ -77,5 +108,5 @@ console shell is an interactive bash: a `!!` in a command is history expansion, 
 
 ## Not done yet
 
-Swap, FIDO2 enrollment and homed users during the install, an unattended mode driven by a config file,
+Swap, FIDO2 enrollment during the install, token setup for the first user, an unattended mode driven by a config file,
 a PCR policy for the TPM keys, LVM (an addon if ever needed), and any test on real hardware.
