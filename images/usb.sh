@@ -1,10 +1,8 @@
 #!/usr/bin/env bash
-# Build a raw disk image that boots on a physical UEFI machine, for writing to
-# a USB stick. By default it is a live installer: the system runs from the
-# stick with /etc and /var in RAM and the stick mounted read-only, and the image
-# to install sits on the stick (/installer/inglenook.oci). See docs/usb.md and
-# docs/install.md. LIVE=0 builds the old persistent stick instead (/etc and /var
-# on the stick, a full system to try things on).
+# Build a raw disk image that boots the whole OS from a USB stick on a physical
+# UEFI machine, with /etc and /var persistent on the stick: a system to try things
+# on, not an installer (the installer stick is images/installer/stick.sh, see
+# docs/installer.md). See docs/usb.md.
 #
 #   images/usb.sh                   -> build/usb/inglenook.img (+ .zst)
 #   sudo dd if=build/usb/inglenook.img of=/dev/sdX bs=4M conv=fsync status=progress
@@ -26,10 +24,8 @@
 # --with-key=null --name=<name> - <name>.cred`, e.g.
 # ssh.authorized_keys.root or passwd.hashed-password.user.
 #
-# Environment: TARGET_SIZE (default 14G; must fit the stick); LIVE=0 for the
-# persistent stick, which has no encrypted /var (it travels between machines, so no TPM
-# key can follow it). A live stick's image installs with an encrypted root and an encrypted
-# XFS /var in the space after the root (docs/install.md).
+# Environment: TARGET_SIZE (default 14G; must fit the stick). The stick has no encrypted
+# root or /var: it travels between machines, so no TPM key can follow it.
 set -euo pipefail
 
 HERE=$(cd "$(dirname "$0")" && pwd)
@@ -39,12 +35,6 @@ export WORK
 vm=$HERE/test/vm.sh
 
 mkdir -p "$WORK/esp/loader/credentials"
-LIVE=${LIVE:-1}
-rm -rf "$WORK/esp/loader/addons"
-if [[ $LIVE == 1 ]]; then
-  "$HERE/live-addon.sh" "$WORK/esp"
-  export IMAGE_ON_ROOT=1
-fi
 
 # The login key is dev-keys/authorized_keys (images/build.sh generates it on
 # first use; gitignored).
@@ -61,9 +51,7 @@ openssl passwd -6 -stdin < "$WORK/password" | tr -d '\n' \
 # console= order: the last one becomes /dev/console, so tty0 (the screen) goes
 # last; ttyS0 still receives the kernel log for machines with a serial port.
 kargs="rw console=ttyS0,115200n8 console=tty0"
-# The installed system gets an encrypted XFS /var in the space after its root (a live stick
-# ignores it); a persistent stick travels between machines and has no TPM key, so no var there.
-[[ $LIVE == 1 ]] && kargs+=" inglenook.var=xfs"
+# No inglenook.var=xfs: a stick that travels between machines has no TPM key for a var volume.
 ref=$(KARGS="$kargs" \
         "$REPO/images/build.sh" | tee /dev/stderr | sed -n 's/^built //p')
 
@@ -80,7 +68,7 @@ cat <<EOF
 
 image:     $WORK/inglenook.img   ($(du -h --apparent-size "$WORK/inglenook.img" | cut -f1); also .zst)
 write:     sudo dd if=$WORK/inglenook.img of=/dev/sdX bs=4M conv=fsync status=progress
-mode:      $([[ $LIVE == 1 ]] && echo "live (RAM state, read-only stick, image in /installer)" || echo "persistent")
+mode:      persistent (/etc and /var are on the stick)
 login:     user / $(cat "$WORK/password")   (console)
            ssh -i $REPO/dev-keys/id_ed25519 user@inglenook.local   (or the IP shown on the login screen)
 EOF

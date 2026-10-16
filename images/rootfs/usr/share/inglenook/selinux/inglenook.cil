@@ -28,10 +28,10 @@
 (allow policykit_auth_t user_devpts_t (chr_file (getattr)))
 (allow chkpwd_t user_devpts_t (chr_file (read write)))
 
-; The live stick's console autologin (agetty --autologin root, login -f): the
-; PAM account check runs unix_chkpwd, which inherits the console tty.
+; A login on the console (agetty and login): the PAM account check runs
+; unix_chkpwd, which inherits the console tty.
 (allow chkpwd_t tty_device_t (chr_file (read write)))
 
-; The same for the live autologin through kmscon (the tty1 console): unix_chkpwd
-; inherits kmscon's pty.
+; The same for a login through kmscon (the tty1 console): unix_chkpwd inherits
+; kmscon's pty.
 (allow chkpwd_t kmscon_devpts_t (chr_file (read write)))

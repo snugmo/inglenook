@@ -28,12 +28,6 @@ if [ "$rc" -eq 0 ] && [ -d /mnt/share/esp ]; then
   mkdir -p /mnt/esp
   mount /dev/vdb2 /mnt/esp && cp -rT /mnt/share/esp /mnt/esp && sync && umount /mnt/esp || rc=1
 fi
-if [ "$rc" -eq 0 ] && [ -e /mnt/share/imageonroot ]; then
-  mkdir -p /mnt/root
-  mount /dev/vdb3 /mnt/root && mkdir -p /mnt/root/installer \
-    && skopeo copy oci-archive:/mnt/share/inglenook.oci oci:/mnt/root/installer/inglenook:latest \
-    && sync && umount /mnt/root || rc=1
-fi
 echo "INSTALL_EXIT=$rc" | tee /mnt/share/result
 sync
 systemctl poweroff -f
