@@ -118,23 +118,11 @@ COPY rootfs/ /
 # and the login banner (rootfs/usr/lib/issue.d) shows it with the IP addresses.
 RUN sed -i 's/^DEFAULT_HOSTNAME=.*/DEFAULT_HOSTNAME="inglenook"/' /usr/lib/os-release
 
-# Account & access. Default login account (UID 1000, shared with the cote
-# workspace images), declared with sysusers.d so systemd-sysusers re-creates it
-# at boot if /etc was wiped (no useradd at build time; /etc/passwd is not part
-# of the image's contract). A plain passwd entry is deliberate: a userdb
-# drop-in record was not visible to setuid sudo. The agent pubkey is baked in
-# at build time via --build-arg SSH_PUBKEY=… into a root-owned file under /usr;
-# tmpfiles.d symlinks it as ~/.ssh/authorized_keys. That path is the one place
-# both the regular sshd and the per-connection sshd that systemd-ssh-generator
-# starts for ssh-over-vsock read (the latter overrides AuthorizedKeysFile to
-# only a hypervisor credential plus ~/.ssh/authorized_keys), so no sshd config
-# is needed. SSH host keys are generated on first sshd run.
-ARG SSH_PUBKEY=
-RUN mkdir -p /usr/lib/ssh/authorized_keys \
- && printf 'g user 1000\nu user 1000:user "user" /var/home/user /bin/bash\nm user wheel\n' > /usr/lib/sysusers.d/inglenook-user.conf \
- && printf '%s\n' "$SSH_PUBKEY" > /usr/lib/ssh/authorized_keys/user \
- && chmod 0644 /usr/lib/ssh/authorized_keys/user \
- && printf 'd /var/home/user 0700 user user -\nd /var/home/user/.ssh 0700 user user -\nL+ /var/home/user/.ssh/authorized_keys - - - - /usr/lib/ssh/authorized_keys/user\n' > /usr/lib/tmpfiles.d/inglenook-user.conf
+# Account & access. No regular account and no ssh key are baked into the image: root
+# is locked, and the first user is a systemd-homed account that the installer asks
+# for and creates on the first boot from a credential (docs/installer.md). SSH host
+# keys are generated on first sshd run. (Tests and the persistent stick log in through
+# credentials passed to the VM or the stick's ESP, never through a key in the image.)
 
 # PAM: put pam_systemd_home into the authselect profile (the features the base
 # image selected stay), so homed users can log in on the console, with run0 and
@@ -142,13 +130,6 @@ RUN mkdir -p /usr/lib/ssh/authorized_keys \
 # copy below. pam-u2f is installed but its feature (with-pam-u2f) stays off:
 # turning it on makes every plain account need a key mapping.
 RUN authselect select $(authselect current --raw) with-systemd-homed --force
-
-# Rootless podman/buildah need subordinate id ranges for `user`; a sysusers.d
-# account does not get any (useradd would add them). The ranges only need to
-# exist, so they are plain /etc files seeded here and carried by the factory
-# copy below.
-RUN printf 'user:524288:65536\n' > /etc/subuid \
- && printf 'user:524288:65536\n' > /etc/subgid
 
 # Local SELinux policy. The CIL modules in rootfs/usr/share/inglenook/selinux
 # are installed into the policy store (/etc/selinux, so the factory copy below
@@ -166,8 +147,8 @@ RUN semodule -n -i /usr/share/inglenook/selinux/*.cil \
 # to /usr/share/factory/etc and tmpfiles.d restores each top-level entry that
 # is missing (`C` copies from there when the destination does not exist; `!`
 # limits it to boot time). passwd and group are restored too: system accounts
-# live in /usr/lib/{passwd,group} (nss-altfiles), and sysusers can only add
-# `user` to wheel if wheel is also in /etc/group. shadow and gshadow are not: the
+# live in /usr/lib/{passwd,group} (nss-altfiles), and accounts can only join
+# wheel if wheel is also in /etc/group. shadow and gshadow are not: the
 # SELinux policy forbids systemd-tmpfiles to stat them (an error on every boot
 # with a rule for them), and sysusers recreates what it needs. The `-` backup
 # copies, per-machine files and credstore*, which systemd manages itself, are

@@ -20,7 +20,7 @@ mkdir -p "$WORK"
 [[ -f $WORK/key ]] || ssh-keygen -q -t ed25519 -N '' -C inglenook-test -f "$WORK/key"
 
 "$vm" prep
-ref=$(SSH_PUBKEY=$(cat "$WORK/key.pub") KARGS="rw console=tty0 console=ttyS0,115200n8 inglenook.var=xfs" \
+ref=$(KARGS="rw console=tty0 console=ttyS0,115200n8 inglenook.var=xfs" \
         "$REPO/images/build.sh" | tee /dev/stderr | sed -n 's/^built //p')
 TPM=1 BLOCK_SETUP=tpm2-luks ROOT_SIZE=${ROOT_SIZE:-8G} TARGET_SIZE=${TARGET_SIZE:-14G} "$vm" install "$ref"
 # A real stick is larger than the image: the partition must also use the space

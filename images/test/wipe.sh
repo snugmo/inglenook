@@ -30,11 +30,11 @@ check() { # description command-run-in-guest expected-output
   if [[ $got == "$3" ]]; then echo "ok   $1"; else echo "FAIL $1: got '$got', want '$3'"; fail=1; fi
 }
 checks() {
-  check "user account is back" 'id -un' user
-  check "user is in wheel" 'id -nG user | tr " " "\n" | grep -x wheel' wheel
+  check "the wheel group is back" 'getent group wheel | cut -d: -f1' wheel
+  check "root is locked again" 'passwd -S root | cut -d" " -f2' L
+  check "the homed PAM stack is back" 'grep -q pam_systemd_home /etc/pam.d/system-auth && echo yes' yes
   check "selinux policy restored" 'test -s /etc/selinux/targeted/policy/policy.* && echo yes' yes
   check "selinux mode is $expect_mode" 'getenforce' "$expect_mode"
-  check "subuid restored for rootless podman" 'cut -d: -f1 /etc/subuid' user
   check "no failed units" 'systemctl --failed --no-legend | wc -l' 0
   "$vm" new-avc || fail=1
   check "no journal errors" 'journalctl -b -p err --no-pager -q | grep -avE "virt/tdx|tpm tpm0: A TPM error \(256\)" | cut -c1-200 | head -5' ''

@@ -14,15 +14,13 @@
 #
 # Logins. Nothing is hardcoded in the repo; this script generates, under
 # build/usb (gitignored):
-#   key, key.pub   an ssh test key; key.pub is baked in as user's authorized key
-#   password       a random console password, delivered as a systemd credential
-#                  (passwd.hashed-password.user) on the ESP, which systemd-sysusers
-#                  applies when it creates `user` on first boot
-# To use your own instead, put your public key in build/usb/key.pub (and delete
-# build/usb/password) before running, or add credentials to the stick's ESP
-# afterwards: \loader\credentials\<name>.cred, made with `systemd-creds encrypt
-# --with-key=null --name=<name> - <name>.cred`, e.g.
-# ssh.authorized_keys.root or passwd.hashed-password.user.
+#   password       a random console password for the homed account `user`, delivered
+#                  with the dev ssh key (dev-keys/) as a home.create.user credential on
+#                  the ESP, from which systemd-homed-firstboot creates the account
+# To use your own key instead, put your public key in dev-keys/authorized_keys (and delete
+# build/usb/password for a new password) before running; or add other credentials to the
+# stick's ESP afterwards: \loader\credentials\<name>.cred, made with `systemd-creds encrypt
+# --with-key=null --name=<name> - <name>.cred`, e.g. ssh.authorized_keys.root.
 #
 # Environment: TARGET_SIZE (default 14G; must fit the stick). The stick has no encrypted
 # root or /var: it travels between machines, so no TPM key can follow it.
@@ -36,17 +34,30 @@ vm=$HERE/test/vm.sh
 
 mkdir -p "$WORK/esp/loader/credentials"
 
-# The login key is dev-keys/authorized_keys (images/build.sh generates it on
-# first use; gitignored).
+# The login: a systemd-homed account "user", created on the first boot from a home.create.user
+# credential on the ESP (docs/installer.md, "The first user"), with the generated console
+# password and the dev ssh key (dev-keys/, generated here on first use, gitignored: an unprotected
+# key for trying the stick, not for real use). The image itself has no account.
+if [[ ! -f dev-keys/authorized_keys ]]; then
+  mkdir -p dev-keys
+  ssh-keygen -q -t ed25519 -N '' -C inglenook-dev -f dev-keys/id_ed25519
+  cp dev-keys/id_ed25519.pub dev-keys/authorized_keys
+  echo "generated dev-keys/id_ed25519 (unprotected test key, gitignored)" >&2
+fi
 if [[ ! -f $WORK/password ]]; then
   head -c 64 /dev/urandom | base64 | tr -dc 'A-Za-z0-9' | head -c 16 > "$WORK/password"
   chmod 600 "$WORK/password"
 fi
-cred=$WORK/esp/loader/credentials/passwd.hashed-password.user.cred
+cred=$WORK/esp/loader/credentials/home.create.user.cred
+hash=$(openssl passwd -6 -stdin < "$WORK/password")
 # systemd-creds only encrypts locally as root (otherwise it asks a varlink
 # service that does not exist in a container); `unshare -r` gives it a fake one.
-openssl passwd -6 -stdin < "$WORK/password" | tr -d '\n' \
-  | unshare -r systemd-creds encrypt --with-key=null --name=passwd.hashed-password.user - "$cred"
+HASH=$hash PW=$(cat "$WORK/password") KEYS=$(cat dev-keys/authorized_keys) python3 -I -c '
+import json, os
+print(json.dumps({"userName": "user", "memberOf": ["wheel"], "shell": "/bin/bash", "storage": "directory",
+                  "privileged": {"hashedPassword": [os.environ["HASH"]], "sshAuthorizedKeys": os.environ["KEYS"].splitlines()},
+                  "secret": {"password": [os.environ["PW"]]}}))' \
+  | unshare -r systemd-creds encrypt --with-key=null --name=home.create.user - "$cred"
 
 # console= order: the last one becomes /dev/console, so tty0 (the screen) goes
 # last; ttyS0 still receives the kernel log for machines with a serial port.

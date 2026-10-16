@@ -8,7 +8,7 @@
 #   vm.sh install <image>    install <image> onto a fresh target disk
 #   vm.sh debug <script>     run a script as root in the installer VM, on the existing target disk
 #   vm.sh start [vsock|net]  boot the target disk in the background
-#   vm.sh ssh [cmd...]       ssh to the running VM as $SSH_USER (default: user)
+#   vm.sh ssh [cmd...]       ssh to the running VM as $SSH_USER (default: root; the key is $WORK/key)
 #   vm.sh wait               wait until ssh works
 #   vm.sh stop               stop the VM
 #   vm.sh avc                summarize this boot's SELinux denials (avc-summary.py)
@@ -222,9 +222,9 @@ cmd_ssh() {
   local opts=(-i key -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null
     -o LogLevel=ERROR -o BatchMode=yes -o ConnectTimeout=10)
   if [[ $(cat mode) == vsock ]]; then
-    ssh "${opts[@]}" -o "ProxyCommand=$HERE/vsock-proxy.py vm.vsock 22" "${SSH_USER:-user}@vsock" "$@"
+    ssh "${opts[@]}" -o "ProxyCommand=$HERE/vsock-proxy.py vm.vsock 22" "${SSH_USER:-root}@vsock" "$@"
   else
-    ssh "${opts[@]}" -p 2222 "${SSH_USER:-user}@127.0.0.1" "$@"
+    ssh "${opts[@]}" -p 2222 "${SSH_USER:-root}@127.0.0.1" "$@"
   fi
 }
 

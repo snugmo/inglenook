@@ -67,8 +67,7 @@ with 2 GB of RAM (1 GB is not safe).
 
 ## The first user
 
-A fresh install has a locked root account and no usable regular account (the dev account `user` is
-locked; its only way in is the ssh key that `build.sh` bakes in), so the installer sets up one
+A fresh install has a locked root account and no regular account at all, so the installer sets up one
 systemd-homed account:
 
 - **In the installer:** username, full name (optional) and a password (twice, at least 8 characters).
@@ -83,11 +82,10 @@ systemd-homed account:
   `ConditionFirstBoot=`: the image ships an empty `/etc/machine-id`, which systemd treats as "not a first
   boot" (machine-id(5)); it runs while homed has no record. The home is a plain directory when the root
   is encrypted (it already is), homed's default (a LUKS image) when it is not.
-- **Skipped in the installer:** the same service would prompt on the console (username, password; the
-  account joins `wheel`), but `homectl firstboot` only prompts when no regular user exists, and the
-  dev account `user` (UID 1000, locked) counts as one. **Today a machine installed without a first user
-  has no login**, so do not skip the step. Removing `user` from the image fixes that (see AGENTS.md,
-  gotcha 24). To add users later from an existing login: `homectl create <name> --member-of=wheel`.
+- **Skipped in the installer:** the same service prompts on the console on the first boot (username and
+  password; the account joins `wheel`). Nothing is stored anywhere before that. To add users later from an
+  existing login: `homectl create <name> --member-of=wheel`.
+- The installer also appends `<name>:524288:65536` to `/etc/subuid` and `/etc/subgid` (rootless podman).
 - Without disk encryption the password sits on the unencrypted disk in `/etc/credstore` until the first
   boot deletes the file (and stays recoverable from free space); the installer warns about that.
 - Tokens (FIDO2, PKCS#11) for the account: [tokens.md](tokens.md).

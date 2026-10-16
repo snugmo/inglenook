@@ -7,7 +7,7 @@
 #              stored layers
 #   4. final:  base + a UKI embedding that digest (base layers come from cache)
 # Needs buildah, podman, mkosi and network access for the initrd's packages.
-# Environment: SSH_PUBKEY (default: dev-keys/authorized_keys, generated), KARGS,
+# Environment: KARGS,
 # SELINUX_ENFORCING (default 0 = permissive), SELINUX_NO_DONTAUDIT (default 1),
 # FEDORA_VERSION, DEV_REGISTRY.
 # Usage: images/build.sh [push]
@@ -26,22 +26,8 @@ PRE=localhost/$NAME-pre:$VERSION
 BASE=localhost/$NAME-base:$VERSION
 WORK=build/initrd
 
-# Login key. SSH_PUBKEY wins; otherwise the authorized_keys in dev-keys/ (gitignored,
-# so no key is ever committed), generated on first use. This is an unprotected
-# key for testing boot and login, not for real use.
-if [[ -z ${SSH_PUBKEY:-} ]]; then
-  if [[ ! -f dev-keys/authorized_keys ]]; then
-    mkdir -p dev-keys
-    ssh-keygen -q -t ed25519 -N '' -C inglenook-dev -f dev-keys/id_ed25519
-    cp dev-keys/id_ed25519.pub dev-keys/authorized_keys
-    echo "generated dev-keys/id_ed25519 (unprotected test key, gitignored)" >&2
-  fi
-  SSH_PUBKEY=$(cat dev-keys/authorized_keys)
-fi
-
 args=(--build-arg "VERSION=$VERSION" --build-arg "REVISION=$REVISION"
-      --build-arg "FEDORA_VERSION=$FEDORA_VERSION"
-      --build-arg "SSH_PUBKEY=$SSH_PUBKEY")
+      --build-arg "FEDORA_VERSION=$FEDORA_VERSION")
 [[ -n ${SELINUX_NO_DONTAUDIT:-} ]] && args+=(--build-arg "SELINUX_NO_DONTAUDIT=$SELINUX_NO_DONTAUDIT")
 
 # --layers: buildah defaults to no layer cache, and the later passes must reuse
