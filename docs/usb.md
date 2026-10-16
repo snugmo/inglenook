@@ -29,22 +29,16 @@ gitignored); nothing secret is in the repository. The key is an unprotected test
 
 | What | Where |
 | --- | --- |
-| console login | user `user`, password in `build/usb/password` |
+| console login | the homed account `user`, password in `build/usb/password` |
 | ssh | `ssh -i dev-keys/id_ed25519 user@inglenook.local` (copy that private key to your workstation), or `user@<ip>`; the console login screen shows the IPv4/IPv6 addresses (press Enter to refresh them) |
 
-The password is a systemd credential on the stick's EFI partition
-(`\loader\credentials\passwd.hashed-password.user.cred`) that `systemd-sysusers` applies when it
-creates `user`. The ssh public key is baked into the image at `/usr/lib/ssh/authorized_keys/user`.
+The image has no account. The password and the ssh key are in a `home.create.user` credential on the
+stick's EFI partition (`\loader\credentials\home.create.user.cred`), from which `systemd-homed-firstboot`
+creates the account on the first boot (a plain directory home, member of `wheel`).
 To use your own key, put it in `dev-keys/authorized_keys` (and delete `build/usb/password` for a new
-password) and rerun `images/usb.sh`, or add credentials to the mounted EFI partition:
+password) and rerun `images/usb.sh`.
 
-```sh
-echo -n "$(openssl passwd -6)" | systemd-creds encrypt --with-key=null \
-    --name=passwd.hashed-password.user - passwd.hashed-password.user.cred
-# copy it to <ESP>/loader/credentials/
-```
-
-There is no `sudo` and no setuid file: over ssh, `run0` asks for the `user` password through polkit
+There is no `sudo` and no setuid file: over ssh, `run0` asks for the account's password through polkit
 (a tty is needed: `ssh -t`).
 
 ## What was verified (in QEMU, not on hardware)

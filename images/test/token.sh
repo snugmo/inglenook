@@ -20,11 +20,11 @@ mkdir -p "$WORK"
 [[ -f $WORK/key ]] || ssh-keygen -q -t ed25519 -N '' -C inglenook-test -f "$WORK/key"
 
 "$vm" prep
-ref=${IMAGE:-$(SSH_PUBKEY=$(cat "$WORK/key.pub") "$REPO/images/build.sh" | tee /dev/stderr | sed -n 's/^built //p')}
+ref=${IMAGE:-$("$REPO/images/build.sh" | tee /dev/stderr | sed -n 's/^built //p')}
 "$vm" install "$ref"
 trap '"$vm" stop' EXIT
 "$vm" start vsock
-# root is reachable with $WORK/key (SMBIOS credential); the baked key is for `user`.
+# root is reachable with $WORK/key (SMBIOS credential).
 export SSH_USER=root
 "$vm" wait
 
@@ -95,11 +95,11 @@ check "LUKS home: still unlocks with the token after the wipe" "$(pam login tok3
 g 'sleep 3; homectl deactivate tok3 </dev/null >/dev/null 2>&1 || true'
 
 # --- pam-u2f on a plain /etc/passwd account ---
-g "python3 /var/tmp/token/ptyrun.py $PIN pamu2fcfg -N -u user -o pam://inglenook -i pam://inglenook | tr -d '\r' | grep '^user:' > /var/tmp/token/u2f_keys
+g "useradd -M -s /sbin/nologin u2fuser; python3 /var/tmp/token/ptyrun.py $PIN pamu2fcfg -N -u u2fuser -o pam://inglenook -i pam://inglenook | tr -d '\r' | grep '^u2fuser:' > /var/tmp/token/u2f_keys
 printf 'auth required pam_u2f.so authfile=/var/tmp/token/u2f_keys origin=pam://inglenook appid=pam://inglenook pinverification=1\naccount required pam_permit.so\n' > /etc/pam.d/u2ftest"
-check "pam-u2f key registered for user" 'grep -c "^user:" /var/tmp/token/u2f_keys' 1
-check "pam-u2f login with the right PIN" "$(pam u2ftest user $PIN)" ok
-check "pam-u2f refused with a wrong PIN" "$(pam u2ftest user 0000)" refused
+check "pam-u2f key registered for u2fuser" 'grep -c "^u2fuser:" /var/tmp/token/u2f_keys' 1
+check "pam-u2f login with the right PIN" "$(pam u2ftest u2fuser $PIN)" ok
+check "pam-u2f refused with a wrong PIN" "$(pam u2ftest u2fuser 0000)" refused
 check "pam-u2f refused for an account without a key" "$(pam u2ftest root $PIN)" refused
 
 # No new denials are expected from homed, pam_systemd_home, pam_u2f or the token device. The

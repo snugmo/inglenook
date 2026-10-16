@@ -16,7 +16,7 @@ mkdir -p "$WORK"
 [[ -f $WORK/key ]] || ssh-keygen -q -t ed25519 -N '' -C inglenook-test -f "$WORK/key"
 
 "$vm" prep
-ref=$(SSH_PUBKEY=$(cat "$WORK/key.pub") "$REPO/images/build.sh" | tee /dev/stderr | sed -n 's/^built //p')
+ref=$("$REPO/images/build.sh" | tee /dev/stderr | sed -n 's/^built //p')
 "$vm" install "$ref"
 trap '"$vm" stop' EXIT
 "$vm" start vsock
@@ -32,8 +32,9 @@ check "selinux mode is $expect_mode" 'getenforce' "$expect_mode"
 # Kernel noise a VM cannot avoid is filtered: TDX probing on non-TDX hosts.
 check "no journal errors" 'journalctl -b -p err --no-pager -q | grep -avE "virt/tdx|tpm tpm0: A TPM error \(256\)" | cut -c1-200 | head -5' ''
 check "no failed units" 'systemctl --failed --no-legend | wc -l' 0
-check "user is in wheel" 'id -nG user | tr " " "\n" | grep -x wheel' wheel
-check "no console autologin on an installed system" 'loginctl list-sessions --no-legend | awk "\$3==\"root\" && \$6 ~ /^user/ " | wc -l' 0
+check "the wheel group exists" 'getent group wheel | cut -d: -f1' wheel
+check "root is locked and there is no regular account" 'passwd -S root | cut -d" " -f2; awk -F: "\$3>=1000 && \$3<60000" /etc/passwd /usr/lib/passwd | wc -l' $'L\n0'
+check "no console autologin on an installed system (the only login session is this ssh one)" 'loginctl list-sessions --no-legend | awk "\$6==\"user\"" | wc -l' 1
 check "no setuid files" 'find / -xdev -type f -perm -4000 2>/dev/null | head -3' ''
 check "no network interface besides lo" 'ip -br link | grep -vc "^lo"' 0
 check "/var is mounted read-write" 'findmnt -no OPTIONS /var | tail -1 | cut -d, -f1' rw
