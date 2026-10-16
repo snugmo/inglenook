@@ -36,7 +36,7 @@ we are in the initrd, not the real root${T}findmnt -no FSTYPE /${T}(rootfs|tmpfs
 switch-root never ran${T}systemctl is-active initrd-switch-root.service${T}inactive
 the installer tree is there${T}ls /usr/installer${T}units
 the units are reachable through their symlinks${T}systemctl is-active inglenook-installer.target${T}^active
-the boot medium is one vfat partition${T}lsblk -no FSTYPE,LABEL /dev/sda1 /dev/sda${T}vfat +INGLENOOK
+the boot medium is one vfat partition${T}udevadm settle; lsblk -no FSTYPE,LABEL /dev/sda1 /dev/sda${T}vfat +INGLENOOK
 gdisk is installed${T}gdisk --version${T}GPT fdisk
 sgdisk makes a GPT${T}truncate -s 64M /tmp/d.img && sgdisk -o -n 1:0:0 -c 1:x /tmp/d.img >/dev/null && sgdisk -p /tmp/d.img${T}^ +1 +2048 
 util-linux works${T}lsblk --version${T}util-linux
@@ -66,4 +66,6 @@ libselinux-utils works${T}getsebool -h 2>&1${T}[Uu]sage
 tpm2-tools works${T}tpm2_getcap --version${T}tpm2_getcap
 bind-utils works${T}dig -v 2>&1${T}DiG
 git-core works${T}git --version${T}git version
+skopeo works${T}skopeo --version${T}skopeo version
+skopeo has a default signature policy${T}test -s /usr/share/containers/policy.json -o -s /etc/containers/policy.json && echo has-policy${T}^has-policy
 CHECKS
