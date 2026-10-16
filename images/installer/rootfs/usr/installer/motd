@@ -2,25 +2,18 @@
   Inglenook installer
   -------------------
   This is a root shell running from RAM. Nothing on any disk is changed until
-  you do it yourself. The USB stick is only needed to copy the system image.
+  you confirm it. The USB stick is only needed while the image is copied.
 
-  1. Find the disk to install to (the stick shows TRAN=usb):
+  To install Inglenook onto a disk of this machine, run:
 
-       lsblk -o NAME,SIZE,MODEL,TRAN,FSTYPE,LABEL
+       inglenook-install
 
-  2. The system image is on the stick, in /inglenook/ on its FAT32 partition
-     (image.oci.tar.000, .001, ... and SHA256SUMS). Mount its partition
-     (the vfat one in the lsblk output) read-only, for example:
+  It finds the image on the stick, shows you each disk and what is on it, asks
+  for the size of the root (the rest of the disk becomes /var), encrypts the
+  disk with the TPM, installs, and tells you when to unplug the stick.
 
-       mount -o ro /dev/sda1 /mnt
-
-  3. Partition, encrypt and install: the guided installer does not exist yet.
-
-  4. When the image is copied, the stick can be pulled out.
-
-  5. Reboot into the new system:  systemctl reboot
-
+  Looking around first:  lsblk -o NAME,SIZE,MODEL,TRAN,FSTYPE,LABEL
   Tools: gdisk sgdisk cryptsetup systemd-cryptenroll systemd-repart tpm2_*
          mkfs.* nvme skopeo curl git tar zstd lspci ip dig
-  Nothing is saved on this stick; this shell resets on every boot.
+  Reboot:  systemctl reboot       Nothing is saved on this stick.
 

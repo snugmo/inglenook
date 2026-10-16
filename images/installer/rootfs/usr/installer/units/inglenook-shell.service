@@ -11,6 +11,7 @@ Before=shutdown.target
 # stick that is only ever booted to install, so there is no root password to ask for.
 [Service]
 Environment=HOME=/root
+Environment=PATH=/usr/installer/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin
 WorkingDirectory=-/root
 # the banner comes back after every exit of the shell (Restart=always)
 ExecStart=/usr/installer/bin/shell

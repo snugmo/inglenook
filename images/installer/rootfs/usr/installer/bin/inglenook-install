@@ -1,0 +1,226 @@
+#!/bin/bash
+# inglenook-install: the guided install of Inglenook onto a local disk, from the
+# installer stick. It runs as root in the installer initrd (nothing is mounted
+# from the stick except while the image is read from it).
+#
+# Steps: find the image on the stick, pick the disk (shown in full, wiped only
+# after a clear confirmation), partition it with systemd-repart (ESP, root of
+# the chosen size, a scratch partition; the rest stays free for /var, which the
+# installed system's initrd creates on its first boot), encrypt the root with
+# the TPM, copy the image off the stick, let go of the stick, `bootc install`.
+#
+# Questions are skipped when their answer is in the environment (the tests do
+# that): INSTALL_DISK, INSTALL_ROOT_SIZE (50G), INSTALL_ENCRYPT (tpm2|none),
+# INSTALL_RECOVERY_KEY (1|0), INSTALL_YES=1 (assume yes everywhere, including
+# the wipe), INSTALL_NO_REBOOT=1, INSTALL_TARGET_IMGREF, INSTALL_IMAGE_DIR.
+set -euo pipefail
+
+IN=/usr/installer
+RUN=/run/inglenook-install
+ESP_SIZE=1G
+DEFAULT_ROOT=50G
+MIN_ROOT_GIB=8
+MIN_VAR_GIB=2
+mkdir -p "$RUN"
+
+say()  { printf '\n==> %s\n' "$*"; }
+warn() { printf '\nWARNING: %s\n' "$*" >&2; }
+die()  { printf '\nERROR: %s\n' "$*" >&2; exit 1; }
+# ask VAR "question" [default]: leaves VAR alone when it is already set.
+ask() {
+  local var=$1 prompt=$2 def=${3:-} reply
+  [ -n "${!var:-}" ] && return 0
+  read -r -p "$prompt${def:+ [$def]}: " reply || die "no answer (end of input)"
+  printf -v "$var" '%s' "${reply:-$def}"
+}
+yes_no() { # yes_no "question" default(y|n): 0 for yes
+  local reply def=$2
+  [ -n "${INSTALL_YES:-}" ] && return 0
+  read -r -p "$1 [$( [ "$def" = y ] && echo Y/n || echo y/N )]: " reply || die "no answer (end of input)"
+  reply=${reply:-$def}
+  [[ $reply == [Yy]* ]]
+}
+gib() { echo $(( $1 / 1073741824 )); }
+
+[ "$(id -u)" = 0 ] || die "run as root"
+
+# --- 1. The image on the stick -------------------------------------------------
+find_image() {
+  [ -n "${INSTALL_IMAGE_DIR:-}" ] && { SRC=$INSTALL_IMAGE_DIR; SRCDEV=; return 0; }
+  local dev n=0 mnt
+  for dev in $(lsblk -rpno PATH,FSTYPE | awk '$2 == "vfat" { print $1 }'); do
+    mnt=$RUN/src$((n++)); mkdir -p "$mnt"
+    mount -o ro "$dev" "$mnt" 2>/dev/null || continue
+    if [ -f "$mnt/inglenook/image.oci.tar.000" ]; then SRC=$mnt; SRCDEV=$dev; return 0; fi
+    umount "$mnt"
+  done
+  return 1
+}
+say "Looking for the Inglenook image (a vfat volume with /inglenook/image.oci.tar.000)"
+for _ in $(seq 30); do find_image && break; sleep 1; done
+[ -n "${SRC:-}" ] || die "No Inglenook image found. Plug in the installer stick, or a FAT32 drive holding /inglenook/."
+IMG=$SRC/inglenook
+echo "    found on ${SRCDEV:-$SRC}"
+[ -f "$IMG/SHA256SUMS" ] || die "$IMG/SHA256SUMS is missing; refusing to install an unverified image."
+echo "    checking the image against SHA256SUMS ..."
+(cd "$IMG" && sha256sum --quiet -c SHA256SUMS) || die "The image does not match SHA256SUMS: a damaged copy? Not installing."
+TARGET_IMGREF=${INSTALL_TARGET_IMGREF:-$(cat "$IMG/target-imgref" 2>/dev/null || true)}
+[ -n "$TARGET_IMGREF" ] || die "No target image reference (set INSTALL_TARGET_IMGREF or provide $IMG/target-imgref)."
+echo "    updates will come from: $TARGET_IMGREF"
+IMG_BYTES=$(cat "$IMG"/image.oci.tar.* | wc -c)
+# the extracted layout plus bootc's temporary files
+SCRATCH_GIB=$(( (IMG_BYTES * 3 / 2) / 1073741824 + 2 ))
+SRC_DISK=
+[ -n "${SRCDEV:-}" ] && SRC_DISK=/dev/$(lsblk -no PKNAME "$SRCDEV" | head -1)
+
+# --- 2. The disk -----------------------------------------------------------------
+if [ -z "${INSTALL_DISK:-}" ]; then
+  say "Disks in this machine"
+  mapfile -t disks < <(lsblk -dpno PATH,TYPE,RO | awk '$2 == "disk" && $3 == 0 { print $1 }' | grep -vE '^/dev/(zram|loop|ram)' | grep -vxF "${SRC_DISK:-none}" || true)
+  [ ${#disks[@]} -gt 0 ] || die "No disk to install to (the installer stick is excluded)."
+  i=0; for d in "${disks[@]}"; do i=$((i+1)); printf '  %d) %s\n' "$i" "$(lsblk -dno PATH,SIZE,TRAN,MODEL "$d")"; done
+  ask INSTALL_DISK "Install to which disk? (number or /dev/... path)" "$([ ${#disks[@]} = 1 ] && echo 1)"
+  if [[ $INSTALL_DISK =~ ^[0-9]+$ ]]; then INSTALL_DISK=${disks[$((INSTALL_DISK-1))]:-}; fi
+fi
+DISK=$INSTALL_DISK
+[ -b "$DISK" ] && [ "$(lsblk -dno TYPE "$DISK")" = disk ] || die "$DISK is not a disk."
+[ "$DISK" != "$SRC_DISK" ] || die "$DISK is the disk the image is read from."
+lsblk -rno MOUNTPOINTS "$DISK" | grep -q . && die "$DISK has mounted filesystems; it is in use."
+DISK_BYTES=$(blockdev --getsize64 "$DISK")
+
+# --- 3. What is on it, and the confirmation ---------------------------------------------
+say "This is what is on $DISK now"
+lsblk -o NAME,SIZE,FSTYPE,LABEL,PARTLABEL "$DISK" | sed 's/^/    /'
+parts=$(lsblk -rno TYPE "$DISK" | grep -c '^part' || true)
+sigs=$(wipefs -n "$DISK" 2>/dev/null | tail -n +2 || true)
+fstypes=$(lsblk -rno FSTYPE "$DISK" | sort -u | grep . | tr '\n' ' ' || true)
+if [ "$parts" = 0 ] && [ -z "$sigs" ] && [ -z "$fstypes" ]; then
+  echo "    The disk looks empty."
+  EMPTY=1
+else
+  EMPTY=0
+  echo "    $parts partition(s); filesystems and signatures: ${fstypes:-none}"
+  case " $fstypes " in *" ntfs "*|*" BitLocker "*) echo "    -> looks like Windows data";; esac
+  case " $fstypes " in *" crypto_LUKS "*) echo "    -> contains LUKS-encrypted volumes (an encrypted Linux install?)";; esac
+  lsblk -rno PARTLABEL "$DISK" | grep -qx root && echo "    -> has a partition labeled 'root': possibly an earlier Inglenook install"
+fi
+printf '\n  *** EVERYTHING ON %s WILL BE ERASED. This cannot be undone. ***\n' "$DISK"
+if [ "$EMPTY" = 1 ]; then
+  yes_no "Install Inglenook to $DISK?" n || die "Cancelled; nothing was changed."
+elif [ -n "${INSTALL_YES:-}" ]; then
+  :
+else
+  read -r -p "To erase it, type the device name ($DISK): " reply || die "no answer (end of input)"
+  [ "$reply" = "$DISK" ] || die "Not confirmed; nothing was changed."
+fi
+
+# --- 4. Sizes ---------------------------------------------------------------------------------
+esp_gib=$(numfmt --from=iec --to-unit=1073741824 "$ESP_SIZE")
+max_root_gib=$(( $(gib "$DISK_BYTES") - esp_gib - SCRATCH_GIB - MIN_VAR_GIB - 1 ))
+[ "$max_root_gib" -ge "$MIN_ROOT_GIB" ] || die "$DISK is too small: it needs about $((MIN_ROOT_GIB + esp_gib + SCRATCH_GIB + MIN_VAR_GIB + 1)) GiB."
+def_root=$DEFAULT_ROOT
+[ "$(numfmt --from=iec --to-unit=1073741824 "$def_root")" -le "$max_root_gib" ] || def_root=${max_root_gib}G
+echo
+echo "The root filesystem holds the system image and its state. Everything else on the disk"
+echo "becomes /var (encrypted, created on the first boot); $max_root_gib GiB is the most the root can have here."
+ask INSTALL_ROOT_SIZE "Size of the root" "$def_root"
+ROOT_BYTES=$(numfmt --from=iec "$INSTALL_ROOT_SIZE" 2>/dev/null) || die "'$INSTALL_ROOT_SIZE' is not a size (examples: 50G, 64G)."
+root_gib=$(gib "$ROOT_BYTES")
+[ "$root_gib" -ge "$MIN_ROOT_GIB" ] && [ "$root_gib" -le "$max_root_gib" ] || die "The root must be between ${MIN_ROOT_GIB}G and ${max_root_gib}G."
+
+# --- 5. Encryption ------------------------------------------------------------------------------
+if [ -z "${INSTALL_ENCRYPT:-}" ]; then
+  if [ -c /dev/tpmrm0 ]; then
+    yes_no "Encrypt the disk, unlocked by this machine's TPM (recommended)?" y && INSTALL_ENCRYPT=tpm2 || INSTALL_ENCRYPT=none
+  else
+    warn "No TPM 2.0 found: the disk cannot be sealed to this machine."
+    yes_no "Install WITHOUT disk encryption?" n || die "Cancelled; nothing was changed."
+    INSTALL_ENCRYPT=none
+  fi
+fi
+[ "$INSTALL_ENCRYPT" = tpm2 ] && [ ! -c /dev/tpmrm0 ] && die "TPM encryption was asked for, but there is no /dev/tpmrm0."
+RECOVERY=
+if [ "$INSTALL_ENCRYPT" = tpm2 ]; then
+  if [ -z "${INSTALL_RECOVERY_KEY:-}" ]; then
+    yes_no "Create a recovery key (needed if the TPM is ever cleared or the board replaced)?" y && INSTALL_RECOVERY_KEY=1 || INSTALL_RECOVERY_KEY=0
+  fi
+fi
+
+# --- 6. Wipe and partition ------------------------------------------------------------------------
+say "Erasing $DISK"
+for p in $(lsblk -rpno PATH,TYPE "$DISK" | awk '$2 == "part" { print $1 }'); do wipefs -a -q "$p" || true; done
+sgdisk -Z -q "$DISK" >/dev/null 2>&1 || true
+wipefs -a -q "$DISK"
+udevadm settle
+
+say "Partitioning: ESP $ESP_SIZE, root ${root_gib}G$([ "$INSTALL_ENCRYPT" = tpm2 ] && echo ' (LUKS2, key sealed to the TPM)'), scratch ${SCRATCH_GIB}G (temporary), the rest free for /var"
+rm -rf "$RUN/repart.d"; mkdir -p "$RUN/repart.d"
+cp "$IN"/repart.d/*.conf "$RUN/repart.d/"
+{
+  printf '[Partition]\nType=root\nLabel=root\nFormat=ext4\nSizeMinBytes=%s\nSizeMaxBytes=%s\n' "$ROOT_BYTES" "$ROOT_BYTES"
+  [ "$INSTALL_ENCRYPT" = tpm2 ] && echo 'Encrypt=tpm2'
+} > "$RUN/repart.d/10-root.conf"
+printf '[Partition]\nType=linux-generic\nLabel=scratch\nFormat=ext4\nSizeMinBytes=%sG\nSizeMaxBytes=%sG\n' "$SCRATCH_GIB" "$SCRATCH_GIB" > "$RUN/repart.d/90-scratch.conf"
+# composefs needs fs-verity on the root filesystem
+SYSTEMD_REPART_MKFS_OPTIONS_EXT4='-O verity' systemd-repart --empty=require --dry-run=no --pretty=no \
+  --definitions="$RUN/repart.d" "$DISK" >/dev/null
+udevadm settle
+for l in ESP root scratch; do for _ in $(seq 20); do [ -e "/dev/disk/by-partlabel/$l" ] && break; sleep 0.5; done; done
+ROOTPART=/dev/disk/by-partlabel/root
+rootdev=$ROOTPART
+if [ "$INSTALL_ENCRYPT" = tpm2 ]; then
+  systemd-cryptsetup attach root "$ROOTPART" - tpm2-device=auto,headless=yes
+  rootdev=/dev/mapper/root
+  if [ "${INSTALL_RECOVERY_KEY:-0}" = 1 ]; then
+    RECOVERY=$(systemd-cryptenroll --recovery-key --unlock-tpm2-device=auto "$ROOTPART" | tail -1)
+    printf '\n  RECOVERY KEY (write it down, it is shown again at the end):\n\n      %s\n\n' "$RECOVERY"
+  fi
+fi
+mkdir -p /target /scratch
+mount "$rootdev" /target
+mkdir -p /target/boot && mount /dev/disk/by-partlabel/ESP /target/boot
+mount /dev/disk/by-partlabel/scratch /scratch
+
+# --- 7. Copy the image off the stick -----------------------------------------------------------------
+say "Copying the image from the stick (about $(( IMG_BYTES / 1048576 )) MiB)"
+mkdir -p /scratch/oci /scratch/tmp
+cat "$IMG"/image.oci.tar.* | tar -x -C /scratch/oci
+# bootc reads the running root's ostree config the way it reads a container's; take the
+# image's own, shipped on the stick next to it.
+mkdir -p /etc/ostree
+if [ -f "$IMG/prepare-root.conf" ]; then cp "$IMG/prepare-root.conf" /etc/ostree/prepare-root.conf
+else printf '[composefs]\nenabled = yes\n[sysroot]\nreadonly = true\n' > /etc/ostree/prepare-root.conf; fi
+for m in "$RUN"/src*; do mountpoint -q "$m" 2>/dev/null && umount "$m"; done
+say "The USB stick is no longer needed: you can unplug it now."
+
+# --- 8. Install ------------------------------------------------------------------------------------------
+say "Installing (bootc, composefs, systemd-boot)"
+mount --bind /scratch/tmp /var/tmp
+bootc install to-filesystem --composefs-backend --bootloader systemd --generic-image \
+  --skip-fetch-check --source-imgref oci:/scratch/oci:latest --target-imgref "$TARGET_IMGREF" /target
+if [ -d /sys/firmware/efi/efivars ] && command -v efibootmgr >/dev/null; then
+  efibootmgr --quiet --create --disk "$DISK" --part 1 --label Inglenook --loader '\EFI\systemd\systemd-bootx64.efi' \
+    || warn "Could not add a boot menu entry; the firmware will use the fallback path (\\EFI\\BOOT\\BOOTX64.EFI)."
+fi
+
+# --- 9. Tidy up ------------------------------------------------------------------------------------------------
+say "Finishing"
+umount /var/tmp /scratch
+scratch_part=$(lsblk -rpno PATH,PARTLABEL "$DISK" | awk '$2 == "scratch" { print $1 }')
+sgdisk -d "$(cat /sys/class/block/"$(basename "$scratch_part")"/partition)" -q "$DISK" >/dev/null
+umount /target/boot /target
+[ "$INSTALL_ENCRYPT" = tpm2 ] && cryptsetup close root
+sync
+say "Installation complete."
+if [ -n "$RECOVERY" ]; then
+  printf '\n  RECOVERY KEY for the encrypted root: %s\n  Keep it somewhere safe and off this machine.\n' "$RECOVERY"
+fi
+echo
+echo "  The first boot asks about a recovery key / FIDO2 token for /var (an empty answer skips it)."
+if [ -z "${INSTALL_NO_REBOOT:-}" ]; then
+  while [ -n "$SRC_DISK" ] && [ -b "$SRC_DISK" ]; do
+    read -r -p "Unplug the USB stick, then press Enter to reboot (or type 'ignore'): " reply || break
+    [ "$reply" = ignore ] && break
+  done
+  systemctl reboot
+fi
