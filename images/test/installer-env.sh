@@ -57,4 +57,12 @@ unzip works${T}unzip -v${T}UnZip
 procps-ng works${T}ps --version${T}procps-ng
 less works${T}less --version${T}less
 which works${T}which which${T}which
+dosfstools works${T}fsck.fat --version${T}fsck.fat
+nvme-cli works${T}nvme version${T}nvme version
+pciutils works${T}lspci --version${T}lspci version
+attr works${T}getfattr --version${T}getfattr
+acl works${T}getfacl --version${T}getfacl
+tpm2-tools works${T}tpm2_getcap --version${T}tpm2_getcap
+bind-utils works${T}dig -v 2>&1${T}DiG
+git-core works${T}git --version${T}git version
 CHECKS
