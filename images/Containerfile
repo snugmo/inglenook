@@ -75,6 +75,8 @@ RUN dnf -y install --exclude=yama-ptrace-enable \
       acl attr bat gawk patch ripgrep tree which \
       # data and archives
       lz4 sqlite xxhash yq zip zlib-ng \
+      # QR codes (qrencode -t ANSIUTF8 shows one in a terminal)
+      qrencode \
       # debugging and sandboxing
       bubblewrap setools-console strace time \
       # network and file transfer
