@@ -37,4 +37,6 @@ switch-root never ran${T}systemctl is-active initrd-switch-root.service${T}inact
 the installer tree is there${T}ls /usr/installer${T}units
 the units are reachable through their symlinks${T}systemctl is-active inglenook-installer.target${T}^active
 the boot medium is one vfat partition${T}lsblk -no FSTYPE,LABEL /dev/sda1 /dev/sda${T}vfat +INGLENOOK
+gdisk is installed${T}gdisk --version${T}GPT fdisk
+sgdisk makes a GPT${T}truncate -s 64M /tmp/d.img && sgdisk -o -n 1:0:0 -c 1:x /tmp/d.img >/dev/null && sgdisk -p /tmp/d.img${T}^ +1 +2048 
 CHECKS
