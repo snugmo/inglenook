@@ -105,6 +105,11 @@ RUN rm -f /etc/dnf/protected.d/{grub2-efi-x64,grub2-pc,grub2-tools-minimal,shim,
 RUN find /usr -xdev -type f -perm -4000 -exec chmod u-s {} + \
  && systemctl enable polkit-agent-helper.socket
 
+# The base image's bootc-generic-growpart.service grows the root partition to the end of the
+# disk, but only in a VM and only for a plain partition (not LUKS). The installer chooses the
+# layout (a fixed root, the rest for /var), so a VM must not behave differently from hardware.
+RUN systemctl mask bootc-generic-growpart.service
+
 # Static files that belong in the image as they are (units, ...): see rootfs/.
 COPY rootfs/ /
 
