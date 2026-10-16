@@ -1,0 +1,23 @@
+[Unit]
+Description=Inglenook installer shell
+DefaultDependencies=no
+After=basic.target
+Conflicts=shutdown.target
+Before=shutdown.target
+
+# Like rescue.service, but straight to a root shell: this is a stick that is
+# only ever booted to install, so there is no root password to ask for.
+[Service]
+Environment=HOME=/root
+Environment=SYSTEMD_SULOGIN_FORCE=1
+WorkingDirectory=-/root
+ExecStart=-/usr/lib/systemd/systemd-sulogin-shell rescue
+Type=idle
+Restart=always
+RestartSec=0
+StandardInput=tty-force
+StandardOutput=inherit
+StandardError=inherit
+KillMode=process
+IgnoreSIGPIPE=no
+SendSIGHUP=yes

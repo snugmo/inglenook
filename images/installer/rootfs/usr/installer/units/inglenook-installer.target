@@ -1,0 +1,6 @@
+[Unit]
+Description=Inglenook installer
+Documentation=file:///usr/installer/README
+Requires=basic.target inglenook-shell.service
+After=basic.target inglenook-shell.service
+AllowIsolate=yes

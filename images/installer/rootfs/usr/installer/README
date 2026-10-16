@@ -1,0 +1,5 @@
+Inglenook installer environment. This tree is the .initrd of the installer UKI
+addon (images/installer/build-addon.sh); the boot initrd supplies everything
+else. Nothing of it is in the installed system. Everything of ours lives under
+/usr/installer; the unit files are reached through symlinks in
+/usr/lib/systemd/system, the only place systemd looks.
