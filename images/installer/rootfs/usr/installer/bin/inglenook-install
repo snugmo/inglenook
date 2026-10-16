@@ -7,13 +7,19 @@
 # after a clear confirmation), partition it with systemd-repart (ESP, root of
 # the chosen size, a scratch partition; the rest stays free for /var, which the
 # installed system's initrd creates on its first boot), encrypt the root with
-# the TPM, copy the image off the stick, let go of the stick, `bootc install`.
+# the TPM, copy the image off the stick, let go of the stick, `bootc install`, and
+# leave a credential that creates the first (systemd-homed) user on the first boot:
+# the root account is locked and there is no other account, so without it nobody
+# could log in.
 #
 # Questions are skipped when their answer is in the environment (the tests do
 # that): INSTALL_DISK, INSTALL_ROOT_SIZE (50G), INSTALL_ENCRYPT (tpm2|none),
-# INSTALL_RECOVERY_KEY (1|0), INSTALL_YES=1 (assume yes everywhere, including
-# the wipe), INSTALL_NO_REBOOT=1, INSTALL_TARGET_IMGREF, INSTALL_IMAGE_DIR.
-set -euo pipefail
+# INSTALL_RECOVERY_KEY (1|0), INSTALL_USER / INSTALL_REALNAME / INSTALL_USER_PASSWORD
+# (the first user; INSTALL_NO_USER=1 skips it), INSTALL_YES=1 (assume yes everywhere,
+# including the wipe), INSTALL_NO_REBOOT=1, INSTALL_TARGET_IMGREF, INSTALL_IMAGE_DIR.
+set -Eeuo pipefail
+# any command that fails unexpectedly says where, with the ERROR: prefix the tests and users look for
+trap 'rc=$?; printf "\nERROR: the installer stopped at line %s (exit status %s): %s\n" "$LINENO" "$rc" "$BASH_COMMAND" >&2' ERR
 
 IN=/usr/installer
 RUN=/run/inglenook-install
@@ -146,6 +152,37 @@ if [ "$INSTALL_ENCRYPT" = tpm2 ]; then
   fi
 fi
 
+# --- 5b. The first user ----------------------------------------------------------------------------
+FIRST_USER=
+if [ -z "${INSTALL_NO_USER:-}" ]; then
+  if [ -z "${INSTALL_USER:-}" ] && [ -n "${INSTALL_YES:-}" ]; then
+    warn "No INSTALL_USER given: the first boot will ask for the first user on the console."
+  elif [ -z "${INSTALL_USER:-}" ]; then
+    echo
+    echo "Nobody can log in to the new system yet: root is locked and there is no other account."
+    if yes_no "Create the first user (a systemd-homed account that may use run0) now?" y; then
+      ask INSTALL_USER "Username"
+    else
+      echo "    Skipped: the first boot will ask for it on the console (systemd-homed-firstboot)."
+    fi
+  fi
+  if [ -n "${INSTALL_USER:-}" ]; then
+    FIRST_USER=$INSTALL_USER
+    [[ $FIRST_USER =~ ^[a-z_][a-z0-9_-]{0,30}$ ]] || die "'$FIRST_USER' is not a usable username (lowercase letters, digits, - and _; at most 31)."
+    case $FIRST_USER in root|user|nobody) die "'$FIRST_USER' is reserved.";; esac
+    if [ -z "${INSTALL_YES:-}" ]; then ask INSTALL_REALNAME "Full name (optional)" ""; fi
+    FIRST_REAL=${INSTALL_REALNAME:-}
+    FIRST_PW=${INSTALL_USER_PASSWORD:-}
+    while [ -z "$FIRST_PW" ]; do
+      read -rsp "Password for $FIRST_USER: " FIRST_PW || die "no answer (end of input)"; echo
+      read -rsp "Password again: " pw2 || die "no answer (end of input)"; echo
+      if [ "$FIRST_PW" != "$pw2" ] || [ "${#FIRST_PW}" -lt 8 ]; then
+        echo "    The two differ, or are shorter than 8 characters. Try again."; FIRST_PW=
+      fi
+    done
+  fi
+fi
+
 # --- 6. Wipe and partition ------------------------------------------------------------------------
 say "Erasing $DISK"
 for p in $(lsblk -rpno PATH,TYPE "$DISK" | awk '$2 == "part" { print $1 }'); do wipefs -a -q "$p" || true; done
@@ -198,6 +235,34 @@ say "Installing (bootc, composefs, systemd-boot)"
 mount --bind /scratch/tmp /var/tmp
 bootc install to-filesystem --composefs-backend --bootloader systemd --generic-image \
   --skip-fetch-check --source-imgref oci:/scratch/oci:latest --target-imgref "$TARGET_IMGREF" /target
+# The first user: a home.create.<name> credential in the new system's /etc/credstore (on the
+# encrypted root, readable by root only). systemd-homed-firstboot creates the account from it
+# on the first boot and the drop-in in the image deletes the file again. The record holds the
+# password hash, and the password itself in "secret" (homed needs it to create the home).
+if [ -n "$FIRST_USER" ]; then
+  say "Leaving a credential for the first user '$FIRST_USER'"
+  deploys=(/target/state/deploy/*/)
+  [ ${#deploys[@]} = 1 ] && [ -d "${deploys[0]}etc" ] || die "Cannot find the deployment's /etc under /target/state/deploy."
+  DEPLOY=${deploys[0]%/}
+  # bootc finalized the target (fstrim, then mounted it read-only)
+  mount -o remount,rw /target
+  # the root is encrypted as a whole: a plain directory home; otherwise homed's default (LUKS)
+  storage=; [ "$INSTALL_ENCRYPT" = tpm2 ] && storage=directory
+  hash=$(printf '%s' "$FIRST_PW" | openssl passwd -6 -stdin)
+  mkdir -p -m 0700 "$DEPLOY/etc/credstore"
+  ( umask 077
+    jq -n --arg u "$FIRST_USER" --arg r "$FIRST_REAL" --arg h "$hash" --arg p "$FIRST_PW" --arg s "$storage" \
+      '{userName: $u, memberOf: ["wheel"], shell: "/bin/bash", privileged: {hashedPassword: [$h]}, secret: {password: [$p]}}
+       + (if $r != "" then {realName: $r} else {} end) + (if $s != "" then {storage: $s} else {} end)' \
+      > "$DEPLOY/etc/credstore/home.create.$FIRST_USER" )
+  [ -s "$DEPLOY/etc/credstore/home.create.$FIRST_USER" ] || die "Could not write the first user's credential."
+  # label it like the initrd's etc-restore does: strip the deployment prefix so the path matches /etc/...
+  setfiles -m -F -r "$DEPLOY" -c "$DEPLOY"/etc/selinux/targeted/policy/policy.* \
+    "$DEPLOY/etc/selinux/targeted/contexts/files/file_contexts" "$DEPLOY/etc/credstore" \
+    || warn "Could not label the credential; the first boot may log SELinux denials."
+  echo "    credential: $(ls -ldZ "$DEPLOY/etc/credstore/home.create.$FIRST_USER" | cut -c1-120)"
+  [ "$INSTALL_ENCRYPT" = tpm2 ] || warn "The disk is not encrypted: the password sits in /etc/credstore until the first boot deletes it."
+fi
 if [ -d /sys/firmware/efi/efivars ] && command -v efibootmgr >/dev/null; then
   efibootmgr --quiet --create --disk "$DISK" --part 1 --label Inglenook --loader '\EFI\systemd\systemd-bootx64.efi' \
     || warn "Could not add a boot menu entry; the firmware will use the fallback path (\\EFI\\BOOT\\BOOTX64.EFI)."
@@ -216,7 +281,12 @@ if [ -n "$RECOVERY" ]; then
   printf '\n  RECOVERY KEY for the encrypted root: %s\n  Keep it somewhere safe and off this machine.\n' "$RECOVERY"
 fi
 echo
-echo "  The first boot asks about a recovery key / FIDO2 token for /var (an empty answer skips it)."
+if [ -n "$FIRST_USER" ]; then
+  echo "  Log in as '$FIRST_USER' after the first boot; use run0 for administrative tasks."
+else
+  echo "  The first boot asks for the first user on the console; without one nobody can log in."
+fi
+echo "  The first boot also asks about a recovery key / FIDO2 token for /var (an empty answer skips it)."
 if [ -z "${INSTALL_NO_REBOOT:-}" ]; then
   while [ -n "$SRC_DISK" ] && [ -b "$SRC_DISK" ]; do
     read -r -p "Unplug the USB stick, then press Enter to reboot (or type 'ignore'): " reply || break
