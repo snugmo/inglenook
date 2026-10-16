@@ -6,6 +6,12 @@ ConditionKernelCommandLine=inglenook.var=xfs
 # flag in the UKI is for the system the stick installs.
 ConditionKernelCommandLine=!inglenook.live
 ConditionPathExists=/etc/initrd-release
+# Without a TPM there is nothing to seal the volume to: skip cleanly (/var stays on the
+# root) instead of failing. After=tpm2.target and no Wants=: systemd-tpm2-generator hooks
+# the target in only when firmware reports a TPM whose device is not there yet, so this
+# waits for a slow driver and is a no-op on a machine without a TPM.
+ConditionPathExists=/dev/tpmrm0
+After=tpm2.target
 After=sysroot.mount
 Requires=sysroot.mount
 Before=bootc-root-setup.service
