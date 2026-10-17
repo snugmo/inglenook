@@ -114,6 +114,7 @@ RUN systemctl mask bootc-generic-growpart.service
 
 # Static files that belong in the image as they are (units, ...): see rootfs/.
 COPY rootfs/ /
+RUN systemctl enable inglenook-token-enroll.service
 
 # systemd uses DEFAULT_HOSTNAME from os-release when /etc/hostname is absent, so
 # a wiped /etc still gets a sensible name; avahi advertises it as <name>.local

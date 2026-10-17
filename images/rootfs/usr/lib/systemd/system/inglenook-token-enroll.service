@@ -1,0 +1,23 @@
+[Unit]
+Description=Enrol a security key for the first user
+Documentation=file:///usr/libexec/inglenook/token-enroll
+After=systemd-homed-firstboot.service systemd-homed.service
+Wants=systemd-homed.service
+Before=systemd-user-sessions.service getty.target
+ConditionPathExists=/etc/inglenook/enroll-token
+# the tests boot with nobody at the console
+ConditionKernelCommandLine=!inglenook.tokenenroll=no
+
+[Service]
+Type=oneshot
+ExecStart=/usr/libexec/inglenook/token-enroll
+StandardInput=tty-force
+StandardOutput=tty
+StandardError=tty
+TTYPath=/dev/console
+TTYReset=yes
+TTYVHangup=yes
+TimeoutSec=infinity
+
+[Install]
+WantedBy=multi-user.target

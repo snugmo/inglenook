@@ -14,7 +14,7 @@
 #
 # Questions are skipped when their answer is in the environment (the tests do
 # that): INSTALL_DISK, INSTALL_ROOT_SIZE (50G), INSTALL_ENCRYPT (tpm2|none),
-# INSTALL_RECOVERY_KEY (1|0), INSTALL_USER / INSTALL_REALNAME / INSTALL_USER_PASSWORD
+# INSTALL_RECOVERY_KEY (1|0), INSTALL_TOKEN (1|0: enrol a FIDO2 key for the first user at the first boot), INSTALL_USER / INSTALL_REALNAME / INSTALL_USER_PASSWORD
 # (the first user; INSTALL_NO_USER=1 skips it), INSTALL_YES=1 (assume yes everywhere,
 # including the wipe), INSTALL_NO_REBOOT=1, INSTALL_TARGET_IMGREF, INSTALL_IMAGE_DIR.
 set -Eeuo pipefail
@@ -180,6 +180,15 @@ if [ -z "${INSTALL_NO_USER:-}" ]; then
         echo "    The two differ, or are shorter than 8 characters. Try again."; FIRST_PW=
       fi
     done
+    FIRST_TOKEN=0
+    if [ -n "${INSTALL_TOKEN:-}" ]; then FIRST_TOKEN=$INSTALL_TOKEN
+    elif [ -z "${INSTALL_YES:-}" ]; then
+      echo
+      echo "A FIDO2 security key (YubiKey ...) can unlock $FIRST_USER's account instead of the password."
+      echo "The first boot then asks you to insert it and to enter its PIN (set one beforehand);"
+      echo "the password keeps working too."
+      yes_no "Enrol a security key for $FIRST_USER at the first boot?" n && FIRST_TOKEN=1
+    fi
   fi
 fi
 
@@ -258,9 +267,13 @@ if [ -n "$FIRST_USER" ]; then
   [ -s "$DEPLOY/etc/credstore/home.create.$FIRST_USER" ] || die "Could not write the first user's credential."
   # Rootless podman and buildah need subordinate id ranges; a homed account gets none by itself.
   for f in subuid subgid; do printf '%s:524288:65536\n' "$FIRST_USER" >> "$DEPLOY/etc/$f"; done
+  if [ "${FIRST_TOKEN:-0}" = 1 ]; then
+    mkdir -p "$DEPLOY/etc/inglenook"; printf '%s\n' "$FIRST_USER" > "$DEPLOY/etc/inglenook/enroll-token"
+  fi
   # label it like the initrd's etc-restore does: strip the deployment prefix so the path matches /etc/...
   setfiles -m -F -r "$DEPLOY" -c "$DEPLOY"/etc/selinux/targeted/policy/policy.* \
     "$DEPLOY/etc/selinux/targeted/contexts/files/file_contexts" "$DEPLOY/etc/credstore" "$DEPLOY/etc/subuid" "$DEPLOY/etc/subgid" \
+    $([ -d "$DEPLOY/etc/inglenook" ] && echo "$DEPLOY/etc/inglenook") \
     || warn "Could not label the credential; the first boot may log SELinux denials."
   echo "    credential: $(ls -ldZ "$DEPLOY/etc/credstore/home.create.$FIRST_USER" | cut -c1-120)"
   [ "$INSTALL_ENCRYPT" = tpm2 ] || warn "The disk is not encrypted: the password sits in /etc/credstore until the first boot deletes it."

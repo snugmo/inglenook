@@ -82,7 +82,7 @@ bad() { echo "FAIL $1"; fail=1; }
 
 echo "installer VM: waiting for the shell"
 run 240 'echo 1 > /proc/sys/kernel/printk; for i in $(seq 60); do blkid -L INGLENOOK && break; sleep 1; done' >/dev/null
-run 20 "(INSTALL_DISK=/dev/vda INSTALL_ROOT_SIZE=${ROOT_SIZE:-8G} INSTALL_ENCRYPT=$([[ $ENCRYPT == 1 ]] && echo tpm2 || echo none) INSTALL_RECOVERY_KEY=0 INSTALL_USER=alice INSTALL_REALNAME='Alice Example' INSTALL_USER_PASSWORD='correct horse battery' INSTALL_YES=1 INSTALL_NO_REBOOT=1 setsid inglenook-install > /tmp/install.log 2>&1 &)" >/dev/null
+run 20 "(INSTALL_DISK=/dev/vda INSTALL_ROOT_SIZE=${ROOT_SIZE:-8G} INSTALL_ENCRYPT=$([[ $ENCRYPT == 1 ]] && echo tpm2 || echo none) INSTALL_RECOVERY_KEY=0 INSTALL_USER=alice INSTALL_TOKEN=1 INSTALL_REALNAME='Alice Example' INSTALL_USER_PASSWORD='correct horse battery' INSTALL_YES=1 INSTALL_NO_REBOOT=1 setsid inglenook-install > /tmp/install.log 2>&1 &)" >/dev/null
 run 900 'until grep -q "no longer needed" /tmp/install.log; do sleep 1; if grep -q "^ERROR:" /tmp/install.log; then break; fi; done; grep -c "no longer needed" /tmp/install.log' | tail -1 | grep -q '^1' \
   && ok "the image was extracted from the stick" || bad "the install never got past the image extraction"
 
@@ -110,7 +110,7 @@ cp "$KEY" "$B/key"; ssh-keygen -y -f "$B/key" > "$B/key.pub"; chmod 600 "$B/key"
 [[ $ENCRYPT == 1 ]] || export TPM=0
 # The first-boot wizard of homed must run (it creates the user from the credential), so no
 # systemd.firstboot=no; the disk-encryption wizard asks on a console nobody answers.
-export VM_FIRSTBOOT=1 VM_CMDLINE="inglenook.cryptenroll=no"
+export VM_FIRSTBOOT=1 VM_CMDLINE="inglenook.cryptenroll=no inglenook.tokenenroll=no"
 echo "boot: the installed disk alone"
 "$vm" start net
 "$vm" wait
@@ -130,6 +130,7 @@ check "bootc knows the registry image" "bootc status --format=json | grep -o '\"
 check "the first user was created" 'homectl list --no-legend | awk "{print \$1}"' alice
 check "the user is in wheel and the password works" 'PASSWORD="correct horse battery" homectl with alice -- id alice | grep -o "10(wheel)"' '10(wheel)'
 check "getent group wheel lists the user (merged sources)" 'getent group wheel' 'wheel:x:10:alice'
+check "the key enrolment was asked for (marker left, wizard skipped by the test)" 'cat /etc/inglenook/enroll-token; systemctl is-enabled inglenook-token-enroll.service' $'alice\nenabled'
 check "the user has subordinate ids for rootless podman" 'grep -c "^alice:" /etc/subuid /etc/subgid | tr "\n" " "' '/etc/subuid:1 /etc/subgid:1 '
 check "the credential with the password is gone" 'ls /etc/credstore | wc -l' 0
 [[ $ENCRYPT == 1 ]] && check "the home is a plain directory (the root is encrypted)" 'homectl inspect alice | sed -n "s/^ *Storage: //p"' 'directory (no encryption)'
