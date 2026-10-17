@@ -104,7 +104,18 @@ systemd-homed account:
 console shell is an interactive bash: a `!!` in a command is history expansion, so the installer prints
 `ERROR:` / `WARNING:` and never `!!!`.
 
+- **A security key (optional):** the installer asks whether to enrol a FIDO2 key for the user
+  (`INSTALL_TOKEN=1|0` answers it). Enrolling needs homed running, which the initrd does not have, so
+  the installer only leaves the user name in `/etc/inglenook/enroll-token`. On the first boot
+  `inglenook-token-enroll.service` (after the homed wizard, before the login prompts, on the console)
+  asks to insert the key and runs `homectl update <user> --fido2-device=auto --fido2-with-client-pin=yes
+  --fido2-with-user-presence=yes`; homectl asks for the account password and the key's PIN (set one
+  beforehand, `ykman fido access change-pin`). `s` skips; the marker is removed either way. One key
+  only: each `--fido2-device=` replaces the account's keys (docs/tokens.md). The password keeps working.
+  The test checks the marker and that the unit is enabled; the wizard itself was **not** driven end to
+  end (the tests boot with `inglenook.tokenenroll=no`, as nobody answers the console).
+
 ## Not done yet
 
-Swap, FIDO2 enrollment during the install, token setup for the first user, an unattended mode driven by a config file,
+Swap, FIDO2 enrollment of the encrypted volumes during the install, an unattended mode driven by a config file,
 a PCR policy for the TPM keys, LVM (an addon if ever needed), and any test on real hardware.

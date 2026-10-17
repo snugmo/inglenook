@@ -1,0 +1,34 @@
+#!/bin/bash
+# First-boot wizard: enrol a FIDO2 security key for the first user, if the installer asked for it
+# (it leaves the user name in /etc/inglenook/enroll-token). Runs on the console after
+# systemd-homed-firstboot has made the account. The marker is removed when the key is enrolled or
+# the question is skipped; the same command works later by hand.
+set -u
+marker=/etc/inglenook/enroll-token
+user=$(cat "$marker" 2>/dev/null) || exit 0
+cmd=(homectl update "$user" --fido2-device=auto --fido2-with-client-pin=yes --fido2-with-user-presence=yes)
+
+if ! homectl inspect "$user" >/dev/null 2>&1; then
+  echo "The account '$user' does not exist (yet); not enrolling a security key."
+  rm -f "$marker"; exit 0
+fi
+
+echo
+echo "Security key for '$user'"
+echo "  The key needs a PIN (set one first with: ykman fido access change-pin)."
+echo "  homectl asks for the account password, then for the PIN, and the key blinks: touch it."
+while :; do
+  read -rp "Insert the key and press Enter (s = skip): " reply || reply=s
+  if [ "$reply" = s ]; then
+    echo "Skipped. Later, as the user: ${cmd[*]}"
+    break
+  fi
+  if "${cmd[@]}"; then
+    echo "Done: '$user' can now log in with the key."
+    echo "A second key or a recovery key: ${cmd[0]} ${cmd[1]} ${cmd[2]} --fido2-device=<first> --fido2-device=<second> --recovery-key=yes"
+    echo "(each use of --fido2-device= replaces the keys the account has, so list them all)"
+    break
+  fi
+  echo "That did not work."
+done
+rm -f "$marker"
