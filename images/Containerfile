@@ -315,6 +315,11 @@ RUN systemctl mask bootc-generic-growpart.service
 COPY rootfs/ /
 RUN systemctl enable inglenook-token-enroll.service netbird.service
 
+# Boot to the graphical login (sddm, enabled by its preset) instead of a text console.
+# The base already points default.target at graphical.target; this states it, as an
+# /etc override that the factory copy below carries.
+RUN systemctl set-default graphical.target && systemctl is-enabled sddm.service
+
 # systemd uses DEFAULT_HOSTNAME from os-release when /etc/hostname is absent, so
 # a wiped /etc still gets a sensible name; avahi advertises it as <name>.local
 # and the login banner (rootfs/usr/lib/issue.d) shows it with the IP addresses.

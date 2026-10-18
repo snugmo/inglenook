@@ -6,7 +6,8 @@
 > wipe-able `/etc` and `/var`;
 > `images/installer/stick.sh` makes the installer stick (docs/installer.md): a root shell in
 > the initrd, `inglenook-install` installs the image to the internal drive. A Sway desktop and
-> its tools are in the image packages, but no display manager is enabled yet.
+> its tools are in the image packages; the default target is graphical.target and sddm
+> (enabled by its preset) shows the login screen.
 > Update this file as things change.
 
 ## Project Overview
