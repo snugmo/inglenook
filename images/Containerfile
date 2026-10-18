@@ -99,7 +99,7 @@ RUN dnf -y install \
       # audio
       alsa-lib alsa-utils pipewire wireplumber \
       # desktop integration, icons and removable media
-      adwaita-icon-theme desktop-file-utils startup-notification udisks2 upower xdg-utils \
+      adwaita-icon-theme desktop-file-utils startup-notification udisks2 upower xdg-dbus-proxy xdg-user-dirs xdg-utils \
       # desktop portals: the -wlr backend for screen capture, the -gtk one for file dialogs
       xdg-desktop-portal xdg-desktop-portal-gtk xdg-desktop-portal-wlr \
  && dnf clean all
