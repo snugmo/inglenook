@@ -158,6 +158,8 @@ RUN dnf -y install --allowerasing \
 # adds the patent-encumbered codecs to them. The freeworld Mesa drivers add H.264/H.265
 # hardware decoding (VA-API) and the Vulkan video decode that the stock Mesa builds lack; they
 # replace the stock mesa-va-drivers and mesa-vulkan-drivers, hence --allowerasing.
+# The arch is spelled out: with the stock x86_64 package installed, dnf otherwise
+# picks the i686 build of the freeworld package, which conflicts with nothing.
 ADD --checksum=sha256:a120c2a2c70ec2c8ad461908aacf316998b03f6b2156c143b772052972e80a95 \
     https://download1.rpmfusion.org/free/fedora/development/45/Everything/x86_64/os/Packages/r/rpmfusion-free-release-45-0.2.noarch.rpm \
     /tmp/rpmfusion-free-release.rpm
@@ -167,7 +169,7 @@ ADD --checksum=sha256:0cb381899827136c92be41a068e6177982bda36ce594729c0bf6f4fa48
 RUN dnf -y install --nogpgcheck /tmp/rpmfusion-free-release.rpm /tmp/rpmfusion-nonfree-release.rpm \
  && rm /tmp/rpmfusion-*-release.rpm \
  && dnf -y install --allowerasing \
-      ffmpeg libavcodec-freeworld mesa-va-drivers-freeworld mesa-vulkan-drivers-freeworld \
+      ffmpeg libavcodec-freeworld mesa-va-drivers-freeworld.x86_64 mesa-vulkan-drivers-freeworld.x86_64 \
  && dnf clean all
 
 # Packages the base ships that this image does not use. There is no GRUB (the
