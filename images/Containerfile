@@ -105,10 +105,12 @@ RUN dnf -y install \
       # small desktop programs: audio mixer, image viewer, notifications, key
       # names, backlight, night colour, bluetooth manager
       blueman brightnessctl dunst imv pavucontrol wev wlsunset \
+      # tray icons for programs that use the appindicator protocol (waybar's tray shows them)
+      libappindicator-gtk3 \
       # virtual file system for the GTK file dialogs (trash, mtp, network shares)
       gvfs gvfs-client \
       # gpg pin entry, smartcard access for gpg and the ssh password prompt
-      gnupg2-scdaemon openssh-askpass pinentry-gnome3 \
+      gnupg2-scdaemon openssh-askpass pinentry pinentry-gnome3 \
       # media framework and its free plugins (the patent-encumbered ones come with RPM Fusion below)
       gstreamer1 gstreamer1-plugin-libav gstreamer1-plugins-bad-free gstreamer1-plugins-base \
       gstreamer1-plugins-good gstreamer1-plugins-ugly-free \
