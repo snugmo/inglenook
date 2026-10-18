@@ -253,6 +253,28 @@ RUN dnf -y install --setopt=tsflags=noscripts netbird netbird-ui \
  && chmod 0600 /etc/sysconfig/netbird \
  && dnf clean all
 
+# Container and cluster clients from Fedora: kubectl (versioned package, the cluster
+# version it matches is 1.37), the docker CLI with buildx and compose (talking to
+# podman's docker-compatible socket; there is no docker daemon in the image),
+# docker-compose-switch (makes `docker-compose` call `docker compose`) and
+# podman-compose.
+RUN dnf -y install \
+      docker-buildx docker-cli docker-compose docker-compose-switch kubernetes1.37-client podman-compose \
+ && dnf clean all
+
+# Supply-chain tools that Fedora does not package, from the projects' GitHub releases,
+# each pinned by the SHA-256 that the release publishes (the pins change with every
+# version): cosign and nono as their x86_64 RPMs, rekor-cli as a static binary.
+ADD --checksum=sha256:2e126115465ba55d03d3aea606cced2a24a1df578c8feb1d9384d584ebda9226 \
+    https://github.com/sigstore/cosign/releases/download/v3.1.3/cosign-3.1.3-1.x86_64.rpm /tmp/cosign.rpm
+ADD --checksum=sha256:8efacdb27f616f5b6ed01b1ba02a9af5b29de42509caa7baeb00eb69dc26107b \
+    https://github.com/nolabs-ai/nono/releases/download/v0.80.0/nono-cli-0.80.0-1.x86_64.rpm /tmp/nono.rpm
+ADD --checksum=sha256:f998f4c36b90803d6b58af648c9c21750ff43bc7fb30d8fbe2b11fb1bcb0a892 --chmod=0755 \
+    https://github.com/sigstore/rekor/releases/download/v1.5.4/rekor-cli-linux-amd64 /usr/bin/rekor-cli
+RUN dnf -y install --nogpgcheck /tmp/cosign.rpm /tmp/nono.rpm \
+ && rm /tmp/cosign.rpm /tmp/nono.rpm \
+ && dnf clean all
+
 # Packages the base ships that this image does not use. dracut is not used (the
 # initrd is built by mkosi), but bootc, ostree and rpm-ostree require the dracut
 # package itself, so only its add-ons go: dracut-network and dracut-squash,
