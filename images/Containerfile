@@ -114,6 +114,40 @@ RUN dnf -y install \
       rsms-inter-vf-fonts vercel-geist-mono-vf-fonts vercel-geist-vf-fonts \
  && dnf clean all
 
+# More userspace tools. Already in the layers above or in the base, so not
+# repeated: buildah, podman, skopeo, bubblewrap, ca-certificates, gawk, gnupg2,
+# gpgme, fish, zsh, xxd, lz4, sqlite, xxhash, yq, zip, zlib-ng, tree, which,
+# patch, nmap-ncat, wget2, yubico-piv-tool, efibootmgr, chrony, systemd-networkd
+# and setools-console, plus bash, tar, xz, zstd, unzip, 7zip, less, nano, vim
+# (vim-minimal; the "vim" of the list is not a package name here), jq, openssl,
+# file, sed, grep, findutils, diffutils, e2fsprogs, btrfs-progs, lvm2, device-mapper,
+# freetype and bootc. ffmpeg-free is Fedora's ffmpeg (no patent-encumbered codecs;
+# the full ffmpeg is in RPM Fusion). vim-default-editor makes vi the default
+# editor and conflicts with nano-default-editor of the base, hence --allowerasing
+# (it only replaces that one package; nano itself stays).
+RUN dnf -y install --allowerasing \
+      # shell and documentation
+      bash-color-prompt bash-completion info man-db vim-default-editor \
+      # monitoring and system information
+      btop dmidecode htop mcelog pciutils usbutils \
+      # archives and compression
+      brotli cpio lzo lzop moreutils \
+      # file systems, disks and storage
+      cifs-utils dosfstools erofs-utils exfatprogs fuse3 kpartx mdadm virtiofsd \
+      # firmware and microcode
+      amd-ucode-firmware fwupd linux-firmware microcode_ctl \
+      # wireless, bluetooth and DNSSEC data
+      bluez dns-root-data iw unbound-anchor wireless-regdb wpa_supplicant \
+      # network tools
+      whois \
+      # TLS, encryption and ssh login through an OpenID provider
+      age gnutls gnutls-utils opkssh opkssh-server \
+      # containers, packaging and power
+      container-selinux crun flatpak tuned \
+      # printing and media
+      cups ffmpeg-free \
+ && dnf clean all
+
 # Packages the base ships that this image does not use. There is no GRUB (the
 # loader is systemd-boot from a UKI, bootc installs it itself), so grub2, shim
 # (only grub2-efi-x64 needs it) and bootupd (the GRUB/shim updater) go, with
