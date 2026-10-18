@@ -323,8 +323,8 @@ RUN sed -i 's/^DEFAULT_HOSTNAME=.*/DEFAULT_HOSTNAME="inglenook"/' /usr/lib/os-re
 # Account & access. No regular account and no ssh key are baked into the image: root
 # is locked, and the first user is a systemd-homed account that the installer asks
 # for and creates on the first boot from a credential (docs/installer.md). SSH host
-# keys are generated on first sshd run. (Tests and the persistent stick log in through
-# credentials passed to the VM or the stick's ESP, never through a key in the image.)
+# keys are generated on first sshd run. (Tests log in through credentials passed to the VM,
+# never through a key in the image.)
 
 # PAM: put pam_systemd_home into the authselect profile (the features the base
 # image selected stay), so homed users can log in on the console, with run0 and

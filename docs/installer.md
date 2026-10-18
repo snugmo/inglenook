@@ -1,7 +1,6 @@
 # The installer stick
 
-A stick that installs Inglenook onto a disk of the machine it is plugged into. It is
-not the live stick of [usb.md](usb.md) (which runs the whole OS from the stick); it boots
+A stick that installs Inglenook onto a disk of the machine it is plugged into. It boots
 a root shell in the *initrd*, runs `inglenook-install`, and is not needed once the image
 has been copied. Secure Boot must be off (the UKI and the addon are unsigned).
 
