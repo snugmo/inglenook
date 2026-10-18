@@ -121,8 +121,7 @@ RUN dnf -y install \
 # and setools-console, plus bash, tar, xz, zstd, unzip, 7zip, less, nano, vim
 # (vim-minimal; the "vim" of the list is not a package name here), jq, openssl,
 # file, sed, grep, findutils, diffutils, e2fsprogs, btrfs-progs, lvm2, device-mapper,
-# freetype and bootc. ffmpeg-free is Fedora's ffmpeg (no patent-encumbered codecs;
-# the full ffmpeg is in RPM Fusion). vim-default-editor makes vi the default
+# freetype and bootc. ffmpeg comes from RPM Fusion below. vim-default-editor makes vi the default
 # editor and conflicts with nano-default-editor of the base, hence --allowerasing
 # (it only replaces that one package; nano itself stays).
 RUN dnf -y install --allowerasing \
@@ -144,8 +143,29 @@ RUN dnf -y install --allowerasing \
       age gnutls gnutls-utils opkssh opkssh-server \
       # containers, packaging and power
       container-selinux crun flatpak tuned \
-      # printing and media
-      cups ffmpeg-free \
+      # printing
+      cups \
+ && dnf clean all
+
+# RPM Fusion (free and nonfree), for ffmpeg and the freeworld drivers. The release
+# packages are pinned by SHA-256 (they carry the repo definitions and the signing
+# keys; every package after that is checked against those keys). F45 is not
+# released yet, so they come from the development tree; at the release the files
+# move to .../fedora/releases/45/Everything/x86_64/os/Packages/r/ and the pins
+# need updating. ffmpeg replaces ffmpeg-free and its libraries, and libavcodec-freeworld
+# adds the patent-encumbered codecs to them. The freeworld Mesa drivers add H.264/H.265
+# hardware decoding (VA-API) and the Vulkan video decode that the stock Mesa builds lack; they
+# replace the stock mesa-va-drivers and mesa-vulkan-drivers, hence --allowerasing.
+ADD --checksum=sha256:a120c2a2c70ec2c8ad461908aacf316998b03f6b2156c143b772052972e80a95 \
+    https://download1.rpmfusion.org/free/fedora/development/45/Everything/x86_64/os/Packages/r/rpmfusion-free-release-45-0.2.noarch.rpm \
+    /tmp/rpmfusion-free-release.rpm
+ADD --checksum=sha256:0cb381899827136c92be41a068e6177982bda36ce594729c0bf6f4fa485a15a9 \
+    https://download1.rpmfusion.org/nonfree/fedora/development/45/Everything/x86_64/os/Packages/r/rpmfusion-nonfree-release-45-0.2.noarch.rpm \
+    /tmp/rpmfusion-nonfree-release.rpm
+RUN dnf -y install --nogpgcheck /tmp/rpmfusion-free-release.rpm /tmp/rpmfusion-nonfree-release.rpm \
+ && rm /tmp/rpmfusion-*-release.rpm \
+ && dnf -y install --allowerasing \
+      ffmpeg libavcodec-freeworld mesa-va-drivers-freeworld mesa-vulkan-drivers-freeworld \
  && dnf clean all
 
 # Packages the base ships that this image does not use. There is no GRUB (the
