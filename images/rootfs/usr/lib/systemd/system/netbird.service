@@ -1,0 +1,20 @@
+[Unit]
+Description=NetBird mesh network client
+Documentation=https://docs.netbird.io/
+After=network.target
+Wants=network.target
+ConditionFileIsExecutable=/usr/bin/netbird
+
+[Service]
+# What `netbird service install` would generate, minus the log file: the log goes
+# to the journal. The package's %post runs that command, which cannot work in an
+# image build, so the Containerfile installs the package without scriptlets.
+EnvironmentFile=-/etc/sysconfig/netbird
+ExecStart=/usr/bin/netbird service run --log-file console
+Restart=always
+RestartSec=5
+StateDirectory=netbird
+StateDirectoryMode=0700
+
+[Install]
+WantedBy=multi-user.target
