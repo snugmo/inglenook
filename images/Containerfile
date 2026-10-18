@@ -246,8 +246,9 @@ ADD --checksum=sha256:62a19f1371ef014bd9e47fcd4b4c6d62476b7b6e22d530ad64b57c645f
 # The package's %post scriptlet runs `netbird service install` and `start`, which
 # need a running systemd, so it is skipped (--setopt=tsflags=noscripts) and what it
 # does is done here: the unit is rootfs/usr/lib/systemd/system/netbird.service, and
-# the environment file, which may hold a PIN, gets mode 0600. The unit is not
-# enabled: netbird is set up by the user (`netbird up`).
+# the environment file, which may hold a PIN, gets mode 0600. The unit is enabled
+# further down, with the other units from rootfs/; the user sets netbird up
+# (`netbird up`).
 RUN dnf -y install --setopt=tsflags=noscripts netbird netbird-ui \
  && chmod 0600 /etc/sysconfig/netbird \
  && dnf clean all
@@ -285,7 +286,7 @@ RUN systemctl mask bootc-generic-growpart.service
 
 # Static files that belong in the image as they are (units, ...): see rootfs/.
 COPY rootfs/ /
-RUN systemctl enable inglenook-token-enroll.service
+RUN systemctl enable inglenook-token-enroll.service netbird.service
 
 # systemd uses DEFAULT_HOSTNAME from os-release when /etc/hostname is absent, so
 # a wiped /etc still gets a sensible name; avahi advertises it as <name>.local
