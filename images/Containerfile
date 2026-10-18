@@ -218,6 +218,23 @@ RUN dnf -y install \
       llvm-libs lsof python-pip-wheel python-unversioned-command python3-pyyaml steam-devices \
  && dnf clean all
 
+# Network management for an interactive desktop: NetworkManager with the Wi-Fi,
+# mobile broadband, bluetooth and VPN plugins, and its tray applet and connection
+# editor (nm-applet shows in waybar's tray through libappindicator). The service
+# is enabled by the packages already; systemd-networkd stays installed but off.
+# NetworkManager hands DNS to systemd-resolved because /etc/resolv.conf links to
+# its stub file, so the two do not fight over it. wireguard needs no plugin.
+# connectivity-fedora checks for captive portals against Fedora's server.
+RUN dnf -y install \
+      NetworkManager NetworkManager-bluetooth NetworkManager-config-connectivity-fedora \
+      NetworkManager-wifi NetworkManager-wwan ModemManager mobile-broadband-provider-info \
+      # VPN plugins (openvpn, openconnect for Cisco AnyConnect and others) with their GTK dialogs
+      NetworkManager-openconnect NetworkManager-openconnect-gnome \
+      NetworkManager-openvpn NetworkManager-openvpn-gnome \
+      # tray applet and the connection editor
+      libnma-gtk4 network-manager-applet nm-connection-editor \
+ && dnf clean all
+
 # NetBird (mesh VPN client and its tray UI) from the vendor's yum repository. The
 # repo metadata and the packages are both signature-checked; the signing key is
 # pinned by SHA-256 (fingerprint AA9C 09AA 9DEA 2F58 112B 40DF DFFE AB2F D267 A61F).
