@@ -187,6 +187,52 @@ RUN dnf -y install --nogpgcheck /tmp/rpmfusion-free-release.rpm /tmp/rpmfusion-n
       mesa-va-drivers-freeworld.x86_64 mesa-vulkan-drivers-freeworld.x86_64 \
  && dnf clean all
 
+# More desktop and system packages. Already listed above (or in the base): audit,
+# authselect, desktop-file-utils, knot-utils, lz4, man-db, python3, time,
+# tuned-ppd. They are not repeated here, apart from the ones that are new in the
+# groups where they belong. nss-tools is the package of certutil and friends (there
+# is no nss-utils). intel-gpu-firmware and amd-gpu-firmware are the GPU firmware
+# that linux-firmware is split into; amdsmi and nvtop are GPU monitors.
+RUN dnf -y install \
+      # X11 clients and helpers for programs that run under Xwayland
+      dbus-x11 xcb-util xdriinfo xev xhost xorg-x11-xauth xorg-x11-xinit xprop xrdb \
+      # toolkits, schemas and web engines
+      gsettings-desktop-schemas gtk3 gtk4 webkit2gtk4.1 webkitgtk6.0 \
+      # D-Bus and desktop services (dbus-broker is the bus daemon)
+      colord dbus dbus-broker flatpak-selinux flatpak-session-helper \
+      # power and firmware updates
+      fwupd-efi fwupd-plugin-uefi-capsule-data thermald tuned-ppd tuned-switcher \
+      # GPU firmware and monitors
+      amd-gpu-firmware amdsmi intel-gpu-firmware nvtop \
+      # TPM tools and libraries
+      tpm2-tools tpm2-tss tpm2-tss-fapi \
+      # firewall, rootless networking and NFS
+      firewalld iproute-tc nfs-utils nftables passt passt-selinux \
+      # file systems
+      f2fs-tools ntfs-3g ntfsprogs \
+      # accounts, keys and certificates
+      keyutils mkpasswd nss-tools shadow-utils shadow-utils-subid \
+      # manuals and text
+      groff man-pages words \
+      # system tools, libraries and python
+      llvm-libs lsof python-pip-wheel python-unversioned-command python3-pyyaml steam-devices \
+ && dnf clean all
+
+# NetBird (mesh VPN client and its tray UI) from the vendor's yum repository. The
+# repo metadata and the packages are both signature-checked; the signing key is
+# pinned by SHA-256 (fingerprint AA9C 09AA 9DEA 2F58 112B 40DF DFFE AB2F D267 A61F).
+COPY rootfs/etc/yum.repos.d/netbird.repo /etc/yum.repos.d/netbird.repo
+ADD --checksum=sha256:62a19f1371ef014bd9e47fcd4b4c6d62476b7b6e22d530ad64b57c645fc11f5d \
+    https://pkgs.netbird.io/yum/repodata/repomd.xml.key /etc/pki/rpm-gpg/RPM-GPG-KEY-netbird
+# The package's %post scriptlet runs `netbird service install` and `start`, which
+# need a running systemd, so it is skipped (--setopt=tsflags=noscripts) and what it
+# does is done here: the unit is rootfs/usr/lib/systemd/system/netbird.service, and
+# the environment file, which may hold a PIN, gets mode 0600. The unit is not
+# enabled: netbird is set up by the user (`netbird up`).
+RUN dnf -y install --setopt=tsflags=noscripts netbird netbird-ui \
+ && chmod 0600 /etc/sysconfig/netbird \
+ && dnf clean all
+
 # Packages the base ships that this image does not use. dracut is not used (the
 # initrd is built by mkosi), but bootc, ostree and rpm-ostree require the dracut
 # package itself, so only its add-ons go: dracut-network and dracut-squash,
