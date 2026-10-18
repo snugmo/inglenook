@@ -26,6 +26,7 @@ Files (keep them together; the installer checks them against SHA256SUMS):
   inglenook/SHA256SUMS                   checksums of the parts
   inglenook/target-imgref                where the installed system updates from
   inglenook/prepare-root.conf            the image's own boot-time configuration
+  inglenook/accounts                     the image's user and group names (not allowed for the first user)
 
 The installer finds the image on any FAT32 volume with inglenook/image.oci.tar.000,
 so a newer image can also come on a second drive.

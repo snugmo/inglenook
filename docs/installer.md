@@ -19,6 +19,7 @@ onto any FAT32 drive (`build/installer/tree`).
 /inglenook/SHA256SUMS                   checked before anything is touched
 /inglenook/target-imgref                where updates come from (a registry, not this stick)
 /inglenook/prepare-root.conf            the image's own ostree config, which bootc reads
+/inglenook/accounts                     the image's user and group names (one per line): the first user's name must not be one of them
 ```
 
 The installer is a UKI **addon** (`images/installer/build-addon.sh`): `.cmdline` is
