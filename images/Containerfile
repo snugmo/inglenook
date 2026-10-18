@@ -85,6 +85,35 @@ RUN dnf -y install --exclude=yama-ptrace-enable \
       ca-certificates gnupg2 gpgme \
  && dnf clean all
 
+# Desktop: the Sway Wayland session with its companions and the graphics stack.
+# sddm-wayland-sway runs the greeter under Sway. wlroots and vulkan-loader are
+# libraries that sway and the Vulkan drivers pull in anyway; they are listed for
+# intent, as are freetype and pango. grimshot takes screenshots. pipewire and
+# wireplumber are the audio/video server and its session manager.
+RUN dnf -y install \
+      # compositor, session and the Wayland tools around it
+      foot fuzzel grimshot kanshi sddm sddm-wayland-sway sway swaybg swayidle swaylock waybar \
+      wl-clipboard wlr-randr wlroots \
+      # graphics drivers and text rendering
+      freetype mesa-dri-drivers mesa-vulkan-drivers pango vulkan-loader \
+      # audio
+      alsa-lib alsa-utils pipewire wireplumber \
+      # desktop integration, icons and removable media
+      adwaita-icon-theme desktop-file-utils startup-notification udisks2 upower xdg-utils \
+ && dnf clean all
+
+# Fonts and locale. The base language is English (langpacks-en pulls the
+# matching fonts through langpacks-fonts-en). default-fonts is the metapackage
+# of the distribution's default fonts; the families after it are the ones the
+# desktop and terminal are meant to use.
+RUN dnf -y install \
+      default-fonts default-fonts-core langpacks-en langpacks-fonts-en \
+      # sans, serif and monospace families
+      abattis-cantarell-fonts abattis-cantarell-vf-fonts adwaita-fonts-all cascadia-fonts-all \
+      jetbrains-mono-fonts-all liberation-fonts-all linux-libertine-fonts-all \
+      rsms-inter-vf-fonts vercel-geist-mono-vf-fonts vercel-geist-vf-fonts \
+ && dnf clean all
+
 # Packages the base ships that this image does not use. There is no GRUB (the
 # loader is systemd-boot from a UKI, bootc installs it itself), so grub2, shim
 # (only grub2-efi-x64 needs it) and bootupd (the GRUB/shim updater) go, with
