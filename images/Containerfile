@@ -129,6 +129,8 @@ RUN dnf -y install \
       # sans, serif and monospace families
       abattis-cantarell-fonts abattis-cantarell-vf-fonts adwaita-fonts-all cascadia-fonts-all \
       jetbrains-mono-fonts-all liberation-fonts-all linux-libertine-fonts-all \
+      redhat-display-fonts redhat-display-vf-fonts redhat-mono-fonts redhat-mono-vf-fonts \
+      redhat-text-fonts redhat-text-vf-fonts \
       rsms-inter-vf-fonts vercel-geist-mono-vf-fonts vercel-geist-vf-fonts \
  && dnf clean all
 
