@@ -102,6 +102,18 @@ RUN dnf -y install \
       adwaita-icon-theme desktop-file-utils startup-notification udisks2 upower xdg-dbus-proxy xdg-user-dirs xdg-utils \
       # desktop portals: the -wlr backend for screen capture, the -gtk one for file dialogs
       xdg-desktop-portal xdg-desktop-portal-gtk xdg-desktop-portal-wlr \
+      # small desktop programs: audio mixer, image viewer, notifications, key
+      # names, backlight, night colour, bluetooth manager
+      blueman brightnessctl dunst imv pavucontrol wev wlsunset \
+      # virtual file system for the GTK file dialogs (trash, mtp, network shares)
+      gvfs gvfs-client \
+      # gpg pin entry, smartcard access for gpg and the ssh password prompt
+      gnupg2-scdaemon openssh-askpass pinentry-gnome3 \
+      # media framework and its free plugins (the patent-encumbered ones come with RPM Fusion below)
+      gstreamer1 gstreamer1-plugin-libav gstreamer1-plugins-bad-free gstreamer1-plugins-base \
+      gstreamer1-plugins-good gstreamer1-plugins-ugly-free \
+      # printing and scanning drivers
+      gutenprint hplip sane-backends \
  && dnf clean all
 
 # Fonts and locale. The base language is English (langpacks-en pulls the
@@ -154,7 +166,7 @@ RUN dnf -y install --allowerasing \
 # keys; every package after that is checked against those keys). F45 is not
 # released yet, so they come from the development tree; at the release the files
 # move to .../fedora/releases/45/Everything/x86_64/os/Packages/r/ and the pins
-# need updating. ffmpeg replaces ffmpeg-free and its libraries, and libavcodec-freeworld
+# need updating. The two gstreamer packages add the codecs the free plugins lack. ffmpeg replaces ffmpeg-free and its libraries, and libavcodec-freeworld
 # adds the patent-encumbered codecs to them. The freeworld Mesa drivers add H.264/H.265
 # hardware decoding (VA-API) and the Vulkan video decode that the stock Mesa builds lack; they
 # replace the stock mesa-va-drivers and mesa-vulkan-drivers, hence --allowerasing.
@@ -169,10 +181,14 @@ ADD --checksum=sha256:0cb381899827136c92be41a068e6177982bda36ce594729c0bf6f4fa48
 RUN dnf -y install --nogpgcheck /tmp/rpmfusion-free-release.rpm /tmp/rpmfusion-nonfree-release.rpm \
  && rm /tmp/rpmfusion-*-release.rpm \
  && dnf -y install --allowerasing \
-      ffmpeg libavcodec-freeworld mesa-va-drivers-freeworld.x86_64 mesa-vulkan-drivers-freeworld.x86_64 \
+      ffmpeg libavcodec-freeworld gstreamer1-plugins-bad-freeworld gstreamer1-plugins-ugly \
+      mesa-va-drivers-freeworld.x86_64 mesa-vulkan-drivers-freeworld.x86_64 \
  && dnf clean all
 
-# Packages the base ships that this image does not use. There is no GRUB (the
+# Packages the base ships that this image does not use. dracut is not used (the
+# initrd is built by mkosi), but bootc, ostree and rpm-ostree require the dracut
+# package itself, so only its add-ons go: dracut-network and dracut-squash,
+# clevis-dracut, and kdump-utils (needs dracut-network). There is no GRUB (the
 # loader is systemd-boot from a UKI, bootc installs it itself), so grub2, shim
 # (only grub2-efi-x64 needs it) and bootupd (the GRUB/shim updater) go, with
 # grub2-set-bootflag's setuid bit. sudo goes too: run0 replaces it and the image
@@ -182,6 +198,7 @@ RUN rm -f /etc/dnf/protected.d/{grub2-efi-x64,grub2-pc,grub2-tools-minimal,shim,
           /usr/share/dnf5/libdnf.conf.d/protect-sudo.conf \
  && dnf -y remove bootupd grub2-common grub2-efi-x64 grub2-pc grub2-pc-modules \
       grub2-tools grub2-tools-minimal os-prober shim-x64 sudo \
+      clevis-dracut dracut-network dracut-squash kdump-utils \
  && dnf clean all
 
 # No setuid binaries. run0 (polkit) replaces sudo, su and pkexec; with
