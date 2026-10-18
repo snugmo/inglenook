@@ -199,7 +199,9 @@ RUN dnf -y install --nogpgcheck /tmp/rpmfusion-free-release.rpm /tmp/rpmfusion-n
 # that linux-firmware is split into; amdsmi and nvtop are GPU monitors.
 RUN dnf -y install \
       # X11 clients and helpers for programs that run under Xwayland
-      dbus-x11 xcb-util xdriinfo xev xhost xorg-x11-xauth xorg-x11-xinit xprop xrdb \
+      dbus-x11 xcb-util xdriinfo xev xhost xinput xorg-x11-xauth xorg-x11-xinit xprop xrdb xset xterm \
+      # X11 core fonts (bitmap and Type 1) for old X programs
+      xorg-x11-fonts-misc xorg-x11-fonts-Type1 \
       # toolkits, schemas and web engines
       gsettings-desktop-schemas gtk3 gtk4 webkit2gtk4.1 webkitgtk6.0 \
       # D-Bus and desktop services (dbus-broker is the bus daemon)
