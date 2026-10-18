@@ -170,6 +170,11 @@ if [ -z "${INSTALL_NO_USER:-}" ]; then
     FIRST_USER=$INSTALL_USER
     [[ $FIRST_USER =~ ^[a-z_][a-z0-9_-]{0,30}$ ]] || die "'$FIRST_USER' is not a usable username (lowercase letters, digits, - and _; at most 31)."
     case $FIRST_USER in root|nobody) die "'$FIRST_USER' is reserved.";; esac
+    # Names the image has as users or groups (the stick's accounts file): a homed account
+    # with one of them would be refused at the first boot, after the install.
+    if [ -f "$IMG/accounts" ] && grep -qxF -- "$FIRST_USER" "$IMG/accounts"; then
+      die "'$FIRST_USER' is already a user or group of the system. Choose another name."
+    fi
     if [ -z "${INSTALL_YES:-}" ]; then ask INSTALL_REALNAME "Full name (optional)" ""; fi
     FIRST_REAL=${INSTALL_REALNAME:-}
     FIRST_PW=${INSTALL_USER_PASSWORD:-}

@@ -13,8 +13,8 @@
 # The image to install is on the stick too, unless NO_IMAGE=1 (fast stick for the
 # environment test): /inglenook/image.oci.tar.NNN is `skopeo copy` of the image as
 # an oci-archive, split in 1 GiB parts for FAT32, with SHA256SUMS, target-imgref
-# (where updates come from; default: the image ref) and the image's own
-# prepare-root.conf. The parts are cached in build/installer/parts-<image id>.
+# (where updates come from; default: the image ref), the image's own
+# prepare-root.conf and accounts (its user and group names). The parts are cached in build/installer/parts-<image id>.
 #
 # Environment: STICK_SIZE (default: the content plus 300 MiB, in whole GiB), PTYPE (sfdisk partition type for the
 # GPT partition: "U" EFI system, "L" Linux data, default "EBD0A0A2-B9E5-4433-87C0-68B6B72699C7"
@@ -49,6 +49,11 @@ if [[ -z ${NO_IMAGE:-} ]]; then
   cp --reflink=auto "$parts"/* "$WORK/tree/inglenook/"
   echo "${TARGET_IMGREF:-$ref}" > "$WORK/tree/inglenook/target-imgref"
   podman cp "$c:/usr/lib/ostree/prepare-root.conf" "$WORK/tree/inglenook/prepare-root.conf"
+  # The user and group names the image already has: the installer refuses them as the first
+  # user's name (homed would refuse them at the first boot, after the install).
+  for f in /etc/passwd /etc/group /usr/lib/passwd /usr/lib/group; do
+    podman cp "$c:$f" - | tar -xOf - | cut -d: -f1
+  done | sort -u > "$WORK/tree/inglenook/accounts"
   cp "$HERE/README.stick.txt" "$WORK/tree/inglenook/README.txt"
 fi
 
