@@ -131,7 +131,8 @@ RUN dnf -y install \
       jetbrains-mono-fonts-all liberation-fonts-all linux-libertine-fonts-all \
       redhat-display-fonts redhat-display-vf-fonts redhat-mono-fonts redhat-mono-vf-fonts \
       redhat-text-fonts redhat-text-vf-fonts \
-      rsms-inter-vf-fonts vercel-geist-mono-vf-fonts vercel-geist-vf-fonts \
+      rsms-inter-vf-fonts vercel-geist-fonts vercel-geist-mono-fonts vercel-geist-mono-vf-fonts \
+      vercel-geist-vf-fonts \
  && dnf clean all
 
 # More userspace tools. Already in the layers above or in the base, so not
