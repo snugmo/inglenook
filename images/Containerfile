@@ -107,6 +107,8 @@ RUN dnf -y install \
       blueman brightnessctl dunst imv pavucontrol wev wlsunset \
       # tray icons for programs that use the appindicator protocol (waybar's tray shows them)
       libappindicator-gtk3 \
+      # per-user resource control: gives the active session's user more CPU and memory weight
+      uresourced \
       # virtual file system for the GTK file dialogs (trash, mtp, network shares)
       gvfs gvfs-client \
       # gpg pin entry, smartcard access for gpg and the ssh password prompt
