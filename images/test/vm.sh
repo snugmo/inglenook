@@ -76,7 +76,10 @@ stop_pid() { # pidfile
 
 cmd_prep() {
   # Rebuild the installer disk when its scripts change, not only on --force.
-  local stamp; stamp=$(cat "$HERE/installer.sh" "$HERE/installer.service" | sha256sum | cut -d' ' -f1)
+  # The installer disk is the image itself plus a second copy of it in container storage,
+  # so it must be a good deal bigger than the image (sparse, so only the used part costs).
+  local size=${INSTALLER_SIZE:-30G} stamp
+  stamp=$({ cat "$HERE/installer.sh" "$HERE/installer.service"; echo "$size"; } | sha256sum | cut -d' ' -f1)
   [[ -f installer.img && $(cat installer.stamp 2>/dev/null) == "$stamp" && ${1:-} != --force ]] && return
   podman pull -q "$BASE" >/dev/null
   local c kver
@@ -95,9 +98,9 @@ cmd_prep() {
     install -m644 "$1/installer.service" rootfs/etc/systemd/system/installer.service
     mkdir -p rootfs/etc/systemd/system/multi-user.target.wants
     ln -sf /etc/systemd/system/installer.service rootfs/etc/systemd/system/multi-user.target.wants/
-    rm -f installer.img && truncate -s 12G installer.img
+    rm -f installer.img && truncate -s "$2" installer.img
     mke2fs -q -t ext4 -L installer -d rootfs installer.img
-    rm -rf rootfs' sh "$HERE"
+    rm -rf rootfs' sh "$HERE" "$size"
   rm -f rootfs.tar
   echo "$stamp" > installer.stamp
 }
