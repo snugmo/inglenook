@@ -100,6 +100,8 @@ RUN dnf -y install \
       alsa-lib alsa-utils pipewire wireplumber \
       # desktop integration, icons and removable media
       adwaita-icon-theme desktop-file-utils startup-notification udisks2 upower xdg-utils \
+      # desktop portals: the -wlr backend for screen capture, the -gtk one for file dialogs
+      xdg-desktop-portal xdg-desktop-portal-gtk xdg-desktop-portal-wlr \
  && dnf clean all
 
 # Fonts and locale. The base language is English (langpacks-en pulls the
