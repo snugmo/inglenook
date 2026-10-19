@@ -212,8 +212,9 @@ cp "$IN"/repart.d/*.conf "$RUN/repart.d/"
   [ "$INSTALL_ENCRYPT" = tpm2 ] && echo 'Encrypt=tpm2'
 } > "$RUN/repart.d/10-root.conf"
 printf '[Partition]\nType=linux-generic\nLabel=scratch\nFormat=ext4\nSizeMinBytes=%sG\nSizeMaxBytes=%sG\n' "$SCRATCH_GIB" "$SCRATCH_GIB" > "$RUN/repart.d/90-scratch.conf"
-# composefs needs fs-verity on the root filesystem
-SYSTEMD_REPART_MKFS_OPTIONS_EXT4='-O verity' systemd-repart --empty=require --dry-run=no --pretty=no \
+# composefs needs fs-verity on the root filesystem. --tpm2-public-key-pcrs= (empty): do not bind the root
+# to the UKI's signed PCR 11 key, which systemd-repart would otherwise pick up from /run/systemd.
+SYSTEMD_REPART_MKFS_OPTIONS_EXT4='-O verity' systemd-repart --tpm2-public-key-pcrs= --empty=require --dry-run=no --pretty=no \
   --definitions="$RUN/repart.d" "$DISK" >/dev/null
 udevadm settle
 for l in ESP root scratch; do for _ in $(seq 20); do [ -e "/dev/disk/by-partlabel/$l" ] && break; sleep 0.5; done; done
@@ -262,11 +263,13 @@ if [ -n "$FIRST_USER" ]; then
   mount -o remount,rw /target
   # the root is encrypted as a whole: a plain directory home; otherwise homed's default (LUKS)
   storage=; [ "$INSTALL_ENCRYPT" = tpm2 ] && storage=directory
+  # perMachine: [] is not decoration: without the field, `homectl update --fido2-device=` on this record
+  # (the first-boot token enrolment) fails with "Object field 'perMachine' has wrong type null".
   hash=$(printf '%s' "$FIRST_PW" | openssl passwd -6 -stdin)
   mkdir -p -m 0700 "$DEPLOY/etc/credstore"
   ( umask 077
     jq -n --arg u "$FIRST_USER" --arg r "$FIRST_REAL" --arg h "$hash" --arg p "$FIRST_PW" --arg s "$storage" \
-      '{userName: $u, memberOf: ["wheel"], shell: "/bin/bash", privileged: {hashedPassword: [$h]}, secret: {password: [$p]}}
+      '{userName: $u, memberOf: ["wheel"], shell: "/bin/bash", perMachine: [], privileged: {hashedPassword: [$h]}, secret: {password: [$p]}}
        + (if $r != "" then {realName: $r} else {} end) + (if $s != "" then {storage: $s} else {} end)' \
       > "$DEPLOY/etc/credstore/home.create.$FIRST_USER" )
   [ -s "$DEPLOY/etc/credstore/home.create.$FIRST_USER" ] || die "Could not write the first user's credential."

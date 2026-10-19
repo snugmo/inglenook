@@ -393,12 +393,6 @@ FROM pre AS base
 RUN --mount=type=bind,from=initrd,target=/initrd \
     set -e; set -- /usr/lib/modules/*; test $# -eq 1 \
  && install -m0644 /initrd/initrd.cpio.zst "$1/initramfs.img"
-# The public half of the key that signs the UKI's PCR 11 prediction (the
-# build context `pcr`, made by build.sh; the initrd has its own copy). systemd
-# sets up the NvPCRs (systemd-tpm2-setup) with a policy that names this key and
-# fails without it. It is also the UKI's .pcrpkey section.
-RUN --mount=type=bind,from=pcr,target=/pcr \
-    install -m0644 /pcr/tpm2-pcr-public-key.pem /usr/lib/systemd/tpm2-pcr-public-key.pem
 
 # UKI stage. The UKI's command line carries composefs=<digest> of the
 # *finished* base rootfs, which is computed by build.sh from the stored
@@ -427,8 +421,13 @@ ARG DEFAULT_HOSTNAME=inglenook
 ARG SELINUX_ENFORCING=0
 RUN test -n "$COMPOSEFS_DIGEST" || { echo "COMPOSEFS_DIGEST not set; build with images/build.sh" >&2; exit 1; }
 RUN dnf -y install systemd-ukify && dnf clean all
-# The private key comes in as the build secret `pcrkey` and stays out of every layer.
-RUN --mount=type=secret,id=pcrkey \
+# The PCR signing key pair comes in as the build secrets `pcrkey` and `pcrpub`
+# (the private half stays out of every layer). The public half becomes the UKI's
+# .pcrpkey; at boot systemd-stub's tmpfiles rule puts it in /run/systemd, which
+# is where systemd-tpm2-setup finds it to set up the NvPCRs. It is deliberately
+# not installed in /usr/lib/systemd: systemd-cryptenroll would then bind every
+# TPM key to the signed PCR 11 and fail where no signature exists (the installer VM).
+RUN --mount=type=secret,id=pcrkey --mount=type=secret,id=pcrpub \
     kver=$(ls /usr/lib/modules) \
  && mkdir -p /out \
  && ukify build \
@@ -438,7 +437,7 @@ RUN --mount=type=secret,id=pcrkey \
       --os-release @/usr/lib/os-release \
       --cmdline "$KARGS enforcing=$SELINUX_ENFORCING systemd.hostname=$DEFAULT_HOSTNAME composefs=?$COMPOSEFS_DIGEST" \
       --pcr-private-key /run/secrets/pcrkey \
-      --pcr-public-key /usr/lib/systemd/tpm2-pcr-public-key.pem \
+      --pcr-public-key /run/secrets/pcrpub \
       --output /out/inglenook.efi
 
 # Final stage: must stay last and bootc-based (see AGENTS.md).
