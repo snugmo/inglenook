@@ -7,7 +7,9 @@
 #              stored layers
 #   4. final:  base + a UKI embedding that digest (base layers come from cache)
 # Needs buildah, podman, mkosi and network access for the initrd's packages.
-# Environment: KARGS,
+# Environment: KARGS, PCR_PRIVATE_KEY and PCR_PUBLIC_KEY (the key that signs the
+# UKI's PCR 11 prediction; default dev-keys/pcr-{private,public}.pem, made with
+# `ukify genkey` when missing: a test key, never published),
 # SELINUX_ENFORCING (default 0 = permissive), SELINUX_NO_DONTAUDIT (default 0; 1 logs the dontaudit denials too),
 # FEDORA_VERSION, DEV_REGISTRY.
 # Usage: images/build.sh [push]
@@ -25,6 +27,15 @@ IMAGE=$REGISTRY/$NAME:$VERSION
 PRE=localhost/$NAME-pre:$VERSION
 BASE=localhost/$NAME-base:$VERSION
 WORK=build/initrd
+PCR_PRIVATE_KEY=${PCR_PRIVATE_KEY:-dev-keys/pcr-private.pem}
+PCR_PUBLIC_KEY=${PCR_PUBLIC_KEY:-dev-keys/pcr-public.pem}
+
+# The PCR signing key: the public half goes into the image and the initrd (and
+# the UKI's .pcrpkey), the private half only into the UKI stage as a secret.
+if [[ ! -f $PCR_PRIVATE_KEY || ! -f $PCR_PUBLIC_KEY ]]; then
+  mkdir -p "$(dirname "$PCR_PRIVATE_KEY")" "$(dirname "$PCR_PUBLIC_KEY")"
+  (umask 077; ukify genkey --pcr-private-key "$PCR_PRIVATE_KEY" --pcr-public-key "$PCR_PUBLIC_KEY")
+fi
 
 args=(--build-arg "VERSION=$VERSION" --build-arg "REVISION=$REVISION"
       --build-arg "FEDORA_VERSION=$FEDORA_VERSION")
@@ -39,7 +50,8 @@ build --target pre -t "$PRE"
 # Initrd inputs that come from the image itself: its kernel modules (mkosi
 # filters them) and bootc's initramfs-setup and unit.
 rm -rf "$WORK"
-mkdir -p "$WORK/in/bootc" "$WORK/in/units" "$WORK/out"
+mkdir -p "$WORK/in/bootc" "$WORK/in/units" "$WORK/in/pcr" "$WORK/out"
+cp "$PCR_PUBLIC_KEY" "$WORK/in/pcr/tpm2-pcr-public-key.pem"
 c=$(podman create "$PRE")
 trap 'podman rm -f "$c" >/dev/null' EXIT
 kver=$(podman run --rm "$PRE" sh -c 'set -- /usr/lib/modules/*; test $# -eq 1 && basename "$1"')
@@ -54,8 +66,9 @@ mkosi --directory images/initrd --force --build-sources= --release "$FEDORA_VERS
   --output-directory "$PWD/$WORK/out" \
   --extra-tree "$PWD/$WORK/in/modules:/usr/lib/modules/$kver" \
   --extra-tree "$PWD/$WORK/in/bootc:/usr/lib/bootc" \
-  --extra-tree "$PWD/$WORK/in/units:/usr/lib/systemd/system"
-args+=(--build-context "initrd=$WORK/out")
+  --extra-tree "$PWD/$WORK/in/units:/usr/lib/systemd/system" \
+  --extra-tree "$PWD/$WORK/in/pcr:/usr/lib/systemd"
+args+=(--build-context "initrd=$WORK/out" --build-context "pcr=$WORK/in/pcr")
 
 build --target base -t "$BASE"
 
@@ -71,7 +84,7 @@ echo "composefs digest: $digest"
 
 [[ -n ${KARGS:-} ]] && args+=(--build-arg "KARGS=$KARGS")
 [[ -n ${SELINUX_ENFORCING:-} ]] && args+=(--build-arg "SELINUX_ENFORCING=$SELINUX_ENFORCING")
-build --build-arg "COMPOSEFS_DIGEST=$digest" -t "$IMAGE"
+build --build-arg "COMPOSEFS_DIGEST=$digest" --secret "id=pcrkey,src=$PCR_PRIVATE_KEY" -t "$IMAGE"
 
 # The UKI is only bootable if the final image still measures the same.
 final=$(composefs_digest "$IMAGE")
