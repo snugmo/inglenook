@@ -191,7 +191,8 @@ cmd_start() {
   # Extra kernel command line through systemd-stub's SMBIOS string (Secure Boot is off in the VM).
   # The first-boot disk encryption wizard (systemd-cryptenroll --firstboot) waits for input, so
   # the tests skip it unless VM_FIRSTBOOT=1.
-  local cmdline_extra=${VM_CMDLINE:-}
+  # The image has no console= (see the Containerfile); the tests read the serial one.
+  local cmdline_extra="console=tty0 console=ttyS0,115200n8 ${VM_CMDLINE:-}"
   [[ -z ${VM_FIRSTBOOT:-} ]] && cmdline_extra="systemd.firstboot=no $cmdline_extra"
   [[ -n $cmdline_extra ]] && args+=(-smbios "type=11,value=io.systemd.stub.kernel-cmdline-extra=$cmdline_extra")
   [[ -f key.pub ]] && args+=(-smbios "type=11,value=io.systemd.credential:ssh.authorized_keys.root=$(cat key.pub)")
