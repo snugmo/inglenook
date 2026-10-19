@@ -13,7 +13,17 @@ if ! homectl inspect "$user" >/dev/null 2>&1; then
   rm -f "$marker"; exit 0
 fi
 
-echo
+# Boot keeps going in parallel, and its status lines scroll this prompt off the screen while the
+# boot waits for the answer (nothing says why it stopped). Silence the status output (the signals
+# of systemd(1): SIGRTMIN+21 off, +20 on) and the kernel's console messages, and start on a clean
+# screen; undo it on the way out.
+loglevel=$(cut -f1 /proc/sys/kernel/printk 2>/dev/null)
+quiet() { kill -s RTMIN+21 1 2>/dev/null; dmesg -n 1 2>/dev/null; }
+loud() { kill -s RTMIN+20 1 2>/dev/null; dmesg -n "${loglevel:-4}" 2>/dev/null; }
+quiet
+trap loud EXIT
+clear 2>/dev/null || printf '\033c'
+
 echo "Security key for '$user'"
 echo "  The key needs a PIN (set one first with: ykman fido access change-pin)."
 echo "  homectl asks for the account password, then for the PIN, and the key blinks: touch it."
