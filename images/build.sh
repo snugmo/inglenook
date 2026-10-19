@@ -8,7 +8,7 @@
 #   4. final:  base + a UKI embedding that digest (base layers come from cache)
 # Needs buildah, podman, mkosi and network access for the initrd's packages.
 # Environment: KARGS,
-# SELINUX_ENFORCING (default 0 = permissive), SELINUX_NO_DONTAUDIT (default 1),
+# SELINUX_ENFORCING (default 0 = permissive), SELINUX_NO_DONTAUDIT (default 0; 1 logs the dontaudit denials too),
 # FEDORA_VERSION, DEV_REGISTRY.
 # Usage: images/build.sh [push]
 set -euo pipefail
