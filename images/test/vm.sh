@@ -236,7 +236,7 @@ cmd_avc() {
 }
 
 # The baseline lists the denials known today (the policy is being worked out, the
-# UKI is permissive and dontaudit rules are off); a test fails only on new ones.
+# UKI is permissive); a test fails only on new ones.
 cmd_new_avc() {
   local new
   # AVC_BASELINE_EXTRA: more known denials for a variant (a space-separated list of files).

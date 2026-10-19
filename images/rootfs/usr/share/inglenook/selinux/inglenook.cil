@@ -2,8 +2,8 @@
 ; time (see the Containerfile). CIL needs no compiler: add `(allow ...)` lines.
 ; To find what is missing, boot with enforcing=0 (the UKI default while the
 ; policy is being worked out) and run `ausearch -m avc` as root; denials that a
-; dontaudit rule would hide are logged too because the image's policy is built
-; with `semodule -DB`.
+; dontaudit rule would hide are logged only in a build with
+; SELINUX_NO_DONTAUDIT=1 (`semodule -DB`).
 
 ; The per-connection sshd that systemd-ssh-generator starts for ssh-over-vsock
 ; accepts a hypervisor-injected key from the ssh.ephemeral-authorized_keys-all

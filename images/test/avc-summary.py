@@ -3,8 +3,8 @@
 
 One line per distinct denial: "<perms> | <source type> -> <target type> : <class>",
 sorted and unique. The process-transition permissions (siginh, rlimitinh,
-noatsecure) are dropped: they are noise that appears once dontaudit rules are
-disabled (see the Containerfile) and is harmless.
+noatsecure) are dropped: they are noise that appears only when dontaudit rules are
+disabled (SELINUX_NO_DONTAUDIT=1, see the Containerfile) and is harmless.
 """
 import re
 import sys

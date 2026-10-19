@@ -347,12 +347,12 @@ RUN authselect select $(authselect current --raw) with-systemd-homed with-group-
 
 # Local SELinux policy. The CIL modules in rootfs/usr/share/inglenook/selinux
 # are installed into the policy store (/etc/selinux, so the factory copy below
-# carries them). SELINUX_NO_DONTAUDIT=1 (the default while the policy is being
-# worked out) rebuilds the policy without dontaudit rules, so that `ausearch -m
-# avc` shows every denial, including the ones the stock policy hides; the
-# process-transition noise (siginh, rlimitinh, noatsecure) comes with it.
+# carries them). The stock dontaudit rules stay in, which keeps the audit log free
+# of process-transition noise (siginh, rlimitinh, noatsecure). For policy work,
+# SELINUX_NO_DONTAUDIT=1 rebuilds the policy without dontaudit rules, so that
+# `ausearch -m avc` shows every denial, including the ones the stock policy hides.
 # -n: do not try to load the policy into the build host's kernel.
-ARG SELINUX_NO_DONTAUDIT=1
+ARG SELINUX_NO_DONTAUDIT=0
 RUN semodule -n -i /usr/share/inglenook/selinux/*.cil \
  && if [ "$SELINUX_NO_DONTAUDIT" = 1 ]; then semodule -n -DB; fi
 
