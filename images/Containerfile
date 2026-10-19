@@ -440,6 +440,7 @@ RUN --mount=type=secret,id=pcrkey --mount=type=secret,id=pcrpub \
       --cmdline "$KARGS enforcing=$SELINUX_ENFORCING systemd.hostname=$DEFAULT_HOSTNAME composefs=?$COMPOSEFS_DIGEST" \
       --pcr-private-key /run/secrets/pcrkey \
       --pcr-public-key /run/secrets/pcrpub \
+      --sign-initrd-pcrs \
       --output /out/inglenook.efi
 
 # Final stage: must stay last and bootc-based (see AGENTS.md).
