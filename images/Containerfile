@@ -211,7 +211,7 @@ RUN dnf -y install \
       fwupd-efi fwupd-plugin-uefi-capsule-data thermald tuned-ppd tuned-switcher \
       # GPU firmware and monitors
       amd-gpu-firmware amdsmi intel-gpu-firmware nvtop \
-      # Intel Wi-Fi, Bluetooth and Visual Sensing Controller firmware (the other pieces of linux-firmware)
+      # Intel wireless firmware (Wi-Fi and Bluetooth) and the Visual Sensing Controller firmware
       intel-vsc-firmware iwlbluetooth-firmware iwlwifi-dvm-firmware iwlwifi-mld-firmware iwlwifi-mvm-firmware \
       # TPM tools and libraries
       tpm2-tools tpm2-tss tpm2-tss-fapi \
