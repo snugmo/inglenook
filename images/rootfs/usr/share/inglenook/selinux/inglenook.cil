@@ -35,3 +35,40 @@
 ; The same for a login through kmscon (the tty1 console): unix_chkpwd inherits
 ; kmscon's pty.
 (allow chkpwd_t kmscon_devpts_t (chr_file (read write)))
+
+; systemd-pcrextend measures into the TPM (PCRs and NvPCRs): it finds the TPM
+; through its udev database entry and lists /run/systemd/nvpcr. Seen on every
+; boot of a machine with a TPM.
+(allow systemd_pcrextend_t udev_var_run_t (file (getattr open read)))
+(allow systemd_pcrextend_t init_var_run_t (dir (read)))
+
+; While run0 checks the password, polkit-agent-helper writes to the fifo that
+; systemd-homed gives out to keep the machine from suspending
+; (/run/systemd/home/<user>.dont-suspend).
+(allow policykit_auth_t systemd_homed_runtime_pipe_t (fifo_file (write)))
+
+; systemd-homed reads /proc/1/environ (container detection).
+(allow systemd_homed_t init_t (dir (search)))
+(allow systemd_homed_t init_t (file (getattr ioctl open read)))
+
+; The NetworkManager dispatcher scripts inherit the journal stream socket
+; (their stdout and stderr) that PID 1 made. Without this their output is lost.
+(allow NetworkManager_dispatcher_chronyc_t init_t (unix_stream_socket (read write)))
+(allow NetworkManager_dispatcher_console_t init_t (unix_stream_socket (read write)))
+(allow NetworkManager_dispatcher_nvme_t init_t (unix_stream_socket (read write)))
+
+; CAP_NET_ADMIN is asked for, and must not be granted, by processes that size
+; a socket buffer (SO_SNDBUFFORCE/SO_RCVBUFFORCE) and fall back to the plain
+; option when refused (the log and notify sockets of libsystemd). The stock
+; policy only hides this for some domains: these are the others that log it.
+(dontaudit gssproxy_t self (capability (net_admin)))
+(dontaudit kmscon_t self (capability (net_admin)))
+(dontaudit policykit_auth_t self (capability (net_admin)))
+(dontaudit system_dbusd_t self (capability (net_admin)))
+(dontaudit systemd_hwdb_t self (capability (net_admin)))
+(dontaudit systemd_modules_load_t self (capability (net_admin)))
+(dontaudit systemd_network_generator_t self (capability (net_admin)))
+(dontaudit systemd_pcrextend_t self (capability (net_admin)))
+(dontaudit systemd_ssh_issue_t self (capability (net_admin)))
+(dontaudit systemd_tmpfiles_t self (capability (net_admin)))
+(dontaudit systemd_user_runtimedir_t self (capability (net_admin)))
