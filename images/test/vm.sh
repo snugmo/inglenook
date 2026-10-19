@@ -192,9 +192,10 @@ cmd_start() {
   # The first-boot disk encryption wizard (systemd-cryptenroll --firstboot) waits for input, so
   # the tests skip it unless VM_FIRSTBOOT=1.
   # The image has no console= (see the Containerfile); the tests read the serial one.
+  # (qemu option values double their commas.)
   local cmdline_extra="console=tty0 console=ttyS0,115200n8 ${VM_CMDLINE:-}"
   [[ -z ${VM_FIRSTBOOT:-} ]] && cmdline_extra="systemd.firstboot=no $cmdline_extra"
-  [[ -n $cmdline_extra ]] && args+=(-smbios "type=11,value=io.systemd.stub.kernel-cmdline-extra=$cmdline_extra")
+  [[ -n $cmdline_extra ]] && args+=(-smbios "type=11,value=io.systemd.stub.kernel-cmdline-extra=${cmdline_extra//,/,,}")
   [[ -f key.pub ]] && args+=(-smbios "type=11,value=io.systemd.credential:ssh.authorized_keys.root=$(cat key.pub)")
   # VM_QEMU_EXTRA: extra qemu arguments, word-split (e.g. a virtual smartcard
   # reader: "-device usb-ccid").

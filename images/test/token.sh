@@ -41,7 +41,7 @@ tar -C "$HERE/token" -c . -C "$HERE" softfido.py | g 'mkdir -p /var/tmp/token &&
 start_token() { g "systemctl stop softfido 2>/dev/null; modprobe uhid; systemd-run -q --unit=softfido python3 /var/tmp/token/softfido.py /var/tmp/token/state $* && sleep 2"; }
 
 check "pam_systemd_home is in the PAM stack" 'grep -c pam_systemd_home /etc/pam.d/system-auth' 4
-check "authselect keeps its other features" 'authselect current --raw | tr " " "\n" | grep -c "^with-"' 3
+check "authselect keeps its other features" 'authselect current --raw | tr " " "\n" | grep -c "^with-"' 4
 check "sshd asks userdb for authorized keys" 'sshd -T | grep -i "^authorizedkeyscommand " | cut -d" " -f2-' '/usr/bin/userdbctl ssh-authorized-keys %u'
 check "sshd has no AuthenticationMethods restriction" 'sshd -T | grep -i "^authenticationmethods" | tr A-Z a-z' 'authenticationmethods any'
 
@@ -73,6 +73,17 @@ g 'homectl deactivate tok2 </dev/null >/dev/null 2>&1 || true'
 check "login refused with a wrong PIN" "$(pam login tok2 0000)" refused
 check "login refused without a PIN" "$(pam login tok2)" refused
 check "run0 (polkit-1) login with the right PIN" "$(pam polkit-1 tok2 $PIN)" ok
+
+# --- a record shaped like the installer's credential (no perMachine entry made by homectl) ---
+# `homectl update --fido2-device=` used to fail on it ("Object field 'perMachine' has wrong type
+# null"); the installer writes perMachine: [] (systemd issue 39599 is the same message).
+g "cat > /var/tmp/token/cred.json <<J
+{\"userName\":\"cred1\",\"memberOf\":[\"wheel\"],\"shell\":\"/bin/bash\",\"storage\":\"directory\",\"perMachine\":[],\"privileged\":{\"hashedPassword\":[\"\$(openssl passwd -6 Passw0rd-xyz)\"]},\"secret\":{\"password\":[\"Passw0rd-xyz\"]}}
+J
+homectl create --identity=/var/tmp/token/cred.json </dev/null >/dev/null 2>&1
+systemd-run -q --unit=answerer /bin/sh /var/tmp/token/answerer.sh $PIN; rm -f /run/systemd/ask-password/*
+PASSWORD=Passw0rd-xyz timeout 90 homectl update cred1 --fido2-device=auto --fido2-with-client-pin=yes --fido2-with-user-presence=yes </dev/null >/dev/null 2>&1; systemctl stop answerer"
+check "installer-shaped record: a token can be enrolled afterwards" 'homectl inspect cred1 | grep "FIDO2 Token" | tr -s " "' ' FIDO2 Token: 1'
 
 # --- a LUKS home (image file) unlocked by the PIN token, with a recovery key ---
 # homectl create needs a password; the LUKS keyslot made from it outlives the record's hash

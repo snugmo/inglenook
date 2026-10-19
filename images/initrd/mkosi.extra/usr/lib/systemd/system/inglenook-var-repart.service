@@ -22,4 +22,6 @@ RemainAfterExit=yes
 # works on the disk that backs /sysroot, which is still the plain ext4 root at
 # this point (bootc-root-setup has not run).
 # A failure (no TPM, no free space) leaves /var on the root and is logged, not fatal.
-ExecStart=-systemd-repart --dry-run=no --root=/sysroot --definitions=/usr/lib/inglenook/repart.d --no-pager
+# --tpm2-public-key-pcrs= (empty): the UKI's signed PCR 11 key is in /run/systemd, and without this
+# repart would bind the volume to it ("PCR policy" is a later step, and the test VM's PCR 11 is not measured).
+ExecStart=-systemd-repart --tpm2-public-key-pcrs= --dry-run=no --root=/sysroot --definitions=/usr/lib/inglenook/repart.d --no-pager
