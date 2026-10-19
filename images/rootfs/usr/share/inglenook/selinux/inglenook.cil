@@ -38,9 +38,12 @@
 
 ; systemd-pcrextend measures into the TPM (PCRs and NvPCRs): it finds the TPM
 ; through its udev database entry and lists /run/systemd/nvpcr. Seen on every
-; boot of a machine with a TPM.
+; boot of a machine with a TPM. To initialise an NvPCR it also reads the PCR
+; public key and signature that systemd-stub's tmpfiles rule copies into
+; /run/systemd (tpm2-pcr-public-key.pem, tpm2-pcr-signature.json).
 (allow systemd_pcrextend_t udev_var_run_t (file (getattr open read)))
 (allow systemd_pcrextend_t init_var_run_t (dir (read)))
+(allow systemd_pcrextend_t init_var_run_t (file (getattr open read)))
 
 ; While run0 checks the password, polkit-agent-helper writes to the fifo that
 ; systemd-homed gives out to keep the machine from suspending
