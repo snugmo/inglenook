@@ -5,6 +5,17 @@
 # tooling — no desktop/GUI). The layers above it (fedora, fedora-toolbox,
 # fedora-workstation) add progressively more, up to a full GUI at the top.
 ARG FEDORA_VERSION=45
+
+# wlsctx (Wayland security-context tagger for sandboxes) has no releases or published
+# binary, so it is built here from a pinned commit; the tarball is pinned by SHA-256
+# and Cargo.lock by --locked. Only the binary is copied into the image (below).
+FROM registry.fedoraproject.org/fedora:${FEDORA_VERSION} AS wlsctx-build
+ADD --checksum=sha256:78a29a88ad1d640c60ad4730d8f891a2b7d3566ef589e1fd3ea30dd7dc0a98ed \
+    https://github.com/wlsctx/wlsctx/archive/27b3403c28329b44f1d127af7d2d2d6a0ff31741.tar.gz /tmp/wlsctx.tar.gz
+RUN dnf -y install cargo gcc && mkdir /src \
+ && tar -xzf /tmp/wlsctx.tar.gz -C /src --strip-components=1 \
+ && cd /src && cargo build --release --locked
+
 FROM registry.fedoraproject.org/fedora-bootc:${FEDORA_VERSION} AS pre
 
 # OCI well-known image labels (image-spec annotations.md). VERSION/REVISION
@@ -285,6 +296,7 @@ ADD --checksum=sha256:10d3be0e77fe6bfb7ea25339b449273d65824f049df3fc2894336b5a3e
     https://github.com/snugmo/flue/releases/download/v0.2.0/flue_0.2.0_linux_amd64 /usr/bin/flue
 ADD --checksum=sha256:f48a73ea6d026a862c3919fc773da9a8c86fc259c2c737d5baed3b8b9614ad22 \
     https://github.com/oras-project/oras/releases/download/v1.3.5/oras_1.3.5_linux_amd64.tar.gz /tmp/oras.tar.gz
+COPY --from=wlsctx-build /src/target/release/wlsctx /usr/bin/wlsctx
 RUN dnf -y install --nogpgcheck /tmp/cosign.rpm /tmp/nono.rpm \
  && tar -xzf /tmp/oras.tar.gz -C /usr/bin oras \
  && rm /tmp/cosign.rpm /tmp/nono.rpm /tmp/oras.tar.gz \
