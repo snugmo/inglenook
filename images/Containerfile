@@ -166,7 +166,7 @@ RUN dnf -y install --allowerasing \
       # archives and compression
       brotli cpio lzo lzop moreutils \
       # file systems, disks and storage
-      cifs-utils dosfstools erofs-utils exfatprogs fuse3 kpartx mdadm virtiofsd \
+      cifs-utils dosfstools erofs-utils exfatprogs fuse3 gdisk kpartx mdadm virtiofsd \
       # firmware and microcode
       amd-ucode-firmware fwupd linux-firmware microcode_ctl \
       # wireless, bluetooth and DNSSEC data
@@ -335,7 +335,7 @@ RUN systemctl mask bootc-generic-growpart.service
 
 # Static files that belong in the image as they are (units, ...): see rootfs/.
 COPY rootfs/ /
-RUN systemctl enable inglenook-token-enroll.service netbird.service
+RUN systemctl enable inglenook-fwupd-efi.service inglenook-token-enroll.service netbird.service
 
 # Boot to the graphical login (sddm, enabled by its preset) instead of a text console.
 # The base already points default.target at graphical.target; this states it, as an

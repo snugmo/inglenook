@@ -1,0 +1,16 @@
+[Unit]
+Description=Keep fwupd's EFI binary on the ESP current
+Documentation=man:fwupdmgr(1)
+# bootc puts only the UKI and systemd-boot on the ESP, so fwupdx64.efi (the capsule update
+# application of fwupd-efi) is copied from the image to where fwupd looks for it, EFI/<ID>/,
+# on every boot: a `bootc upgrade` that brings a new fwupd-efi updates the ESP copy too.
+RequiresMountsFor=/boot
+ConditionPathIsMountPoint=/boot
+ConditionPathExists=/usr/libexec/fwupd/efi/fwupdx64.efi
+
+[Service]
+Type=oneshot
+ExecStart=/bin/sh -c 'cmp -s /usr/libexec/fwupd/efi/fwupdx64.efi /boot/EFI/fedora/fwupdx64.efi || install -D -m 0755 /usr/libexec/fwupd/efi/fwupdx64.efi /boot/EFI/fedora/fwupdx64.efi'
+
+[Install]
+WantedBy=multi-user.target
