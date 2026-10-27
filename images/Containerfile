@@ -335,7 +335,7 @@ RUN systemctl mask bootc-generic-growpart.service
 
 # Static files that belong in the image as they are (units, ...): see rootfs/.
 COPY rootfs/ /
-RUN systemctl enable inglenook-fwupd-efi.service inglenook-token-enroll.service netbird.service
+RUN systemctl enable inglenook-token-enroll.service netbird.service
 
 # Boot to the graphical login (sddm, enabled by its preset) instead of a text console.
 # The base already points default.target at graphical.target; this states it, as an
