@@ -207,11 +207,16 @@ udevadm settle
 say "Partitioning: ESP $ESP_SIZE, root ${root_gib}G$([ "$INSTALL_ENCRYPT" = tpm2 ] && echo ' (LUKS2, key sealed to the TPM)'), scratch ${SCRATCH_GIB}G (temporary), the rest free for /var"
 rm -rf "$RUN/repart.d"; mkdir -p "$RUN/repart.d"
 cp "$IN"/repart.d/*.conf "$RUN/repart.d/"
+# The committed definitions carry the shape of the partitions; systemd-repart's config
+# files take no run-time values (and the root cannot use a SupplementFor= file, which
+# is forbidden together with its Encrypt=tpm2), so what the installer knows now is
+# appended to the copies: the chosen root size and, if selected, the LUKS2 encryption,
+# and a scratch size that fits the image.
 {
-  printf '[Partition]\nType=root\nLabel=root\nFormat=ext4\nSizeMinBytes=%s\nSizeMaxBytes=%s\n' "$ROOT_BYTES" "$ROOT_BYTES"
-  [ "$INSTALL_ENCRYPT" = tpm2 ] && echo 'Encrypt=tpm2'
-} > "$RUN/repart.d/10-root.conf"
-printf '[Partition]\nType=linux-generic\nLabel=scratch\nFormat=ext4\nSizeMinBytes=%sG\nSizeMaxBytes=%sG\n' "$SCRATCH_GIB" "$SCRATCH_GIB" > "$RUN/repart.d/90-scratch.conf"
+  printf 'SizeMinBytes=%s\nSizeMaxBytes=%s\n' "$ROOT_BYTES" "$ROOT_BYTES"
+  if [ "$INSTALL_ENCRYPT" = tpm2 ]; then printf 'Encrypt=tpm2\n'; fi
+} >> "$RUN/repart.d/10-root.conf"
+printf 'SizeMinBytes=%sG\nSizeMaxBytes=%sG\n' "$SCRATCH_GIB" "$SCRATCH_GIB" >> "$RUN/repart.d/90-scratch.conf"
 # composefs needs fs-verity on the root filesystem. --tpm2-public-key-pcrs= (empty): do not bind the root
 # to the UKI's signed PCR 11 key, which systemd-repart would otherwise pick up from /run/systemd.
 # --copy-source=/ resolves the definitions' CopyFiles= sources (the ESP's fwupdx64.efi) against the
