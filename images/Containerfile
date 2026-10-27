@@ -333,6 +333,11 @@ RUN find /usr -xdev -type f -perm -4000 -exec chmod u-s {} + \
 # layout (a fixed root, the rest for /var), so a VM must not behave differently from hardware.
 RUN systemctl mask bootc-generic-growpart.service
 
+# mcelog only supports Intel processors (on AMD it fails: "CPU is unsupported"), but Fedora's
+# preset enables the service, so on an AMD machine it is a failed unit on every boot. Disable
+# it by default; on a supported CPU it can be enabled again.
+RUN systemctl disable mcelog.service
+
 # Static files that belong in the image as they are (units, ...): see rootfs/.
 COPY rootfs/ /
 RUN systemctl enable inglenook-token-enroll.service netbird.service
