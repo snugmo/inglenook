@@ -50,8 +50,10 @@ Boot the stick (the console shows a banner), then run `inglenook-install`. It:
    TPM it asks before installing unencrypted;
 5. asks for the **first user** (below), because root is locked and there is no other account, so
    without one nobody could log in;
-6. wipes the disk, partitions it with `systemd-repart` (`/usr/installer/repart.d/00-esp.conf` plus
-   a root and a temporary scratch partition written at run time: ext4 with fs-verity, `Encrypt=tpm2`),
+6. wipes the disk, partitions it with `systemd-repart` from `/usr/installer/repart.d/`
+   (`00-esp.conf`, `10-root.conf`, `90-scratch.conf`: the shape of each partition is in the
+   committed definitions; the installer appends the chosen root size, `Encrypt=tpm2` when
+   selected, and a scratch size that fits the image: ext4 with fs-verity),
    unpacks the image from the stick to the scratch partition, says the stick is no longer needed,
    runs `bootc install to-filesystem` straight from the initrd (no container), adds a firmware boot
    entry (`efibootmgr`, non-fatal), removes the scratch partition and asks for the stick to be
