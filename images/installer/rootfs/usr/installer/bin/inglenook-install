@@ -214,8 +214,10 @@ cp "$IN"/repart.d/*.conf "$RUN/repart.d/"
 printf '[Partition]\nType=linux-generic\nLabel=scratch\nFormat=ext4\nSizeMinBytes=%sG\nSizeMaxBytes=%sG\n' "$SCRATCH_GIB" "$SCRATCH_GIB" > "$RUN/repart.d/90-scratch.conf"
 # composefs needs fs-verity on the root filesystem. --tpm2-public-key-pcrs= (empty): do not bind the root
 # to the UKI's signed PCR 11 key, which systemd-repart would otherwise pick up from /run/systemd.
-SYSTEMD_REPART_MKFS_OPTIONS_EXT4='-O verity' systemd-repart --tpm2-public-key-pcrs= --empty=require --dry-run=no --pretty=no \
-  --definitions="$RUN/repart.d" "$DISK" >/dev/null
+# --copy-source=/ resolves the definitions' CopyFiles= sources (the ESP's fwupdx64.efi) against the
+# installer's own root: in the initrd repart would default to /sysroot, which is empty here.
+SYSTEMD_REPART_MKFS_OPTIONS_EXT4='-O verity' systemd-repart --tpm2-public-key-pcrs= --copy-source=/ \
+  --empty=require --dry-run=no --pretty=no --definitions="$RUN/repart.d" "$DISK" >/dev/null
 udevadm settle
 for l in ESP root scratch; do for _ in $(seq 20); do [ -e "/dev/disk/by-partlabel/$l" ] && break; sleep 0.5; done; done
 ROOTPART=/dev/disk/by-partlabel/root
