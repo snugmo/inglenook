@@ -18,8 +18,9 @@ OVMF=/usr/share/OVMF
 [[ -f $STICK ]] || { echo "no stick at $STICK; run images/test/install-from-stick.sh first" >&2; exit 1; }
 mkdir -p "$WORK"; cd "$WORK"
 
-# a disk with old data: a labeled ext4 and a partition labeled root
-rm -f target.img; truncate -s 16G target.img
+# a disk with old data: a labeled ext4 and a partition labeled root. Big enough that the
+# disk-level size check passes and the per-root-size checks below are the ones that fire.
+rm -f target.img; truncate -s 32G target.img
 printf 'label: gpt\nstart=1MiB, size=1GiB, type=L, name=olddata\nstart=2GiB, size=1GiB, type=L, name=root\n' | sfdisk -q target.img
 mke2fs -q -F -t ext4 -L olddata -E offset=1048576 target.img 1048576
 sum_before=$(sha256sum target.img | cut -d' ' -f1)
