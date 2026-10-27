@@ -129,6 +129,7 @@ if [[ $ENCRYPT == 1 ]]; then
   check "/var is xfs" 'stat -f -c %T /var' xfs
 fi
 check "bootc knows the registry image" "bootc status --format=json | grep -o '\"image\":\"[^\"]*\"' | head -1" "\"image\":\"$ref\""
+check "fwupd's EFI is on the ESP (copied at install)" '[ "$(sha256sum < /usr/libexec/fwupd/efi/fwupdx64.efi)" = "$(sha256sum < /boot/EFI/BOOT/fwupdx64.efi)" ] && echo same' same
 check "the first user was created" 'homectl list --no-legend | awk "{print \$1}"' alice
 check "the user is in wheel and the password works" 'PASSWORD="correct horse battery" homectl with alice -- id alice | grep -o "10(wheel)"' '10(wheel)'
 check "getent group wheel lists the user (merged sources)" 'getent group wheel' 'wheel:x:10:alice'
