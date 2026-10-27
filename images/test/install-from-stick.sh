@@ -129,7 +129,11 @@ if [[ $ENCRYPT == 1 ]]; then
   check "/var is xfs" 'stat -f -c %T /var' xfs
 fi
 check "bootc knows the registry image" "bootc status --format=json | grep -o '\"image\":\"[^\"]*\"' | head -1" "\"image\":\"$ref\""
-check "fwupd's EFI is on the ESP (copied at install)" '[ "$(sha256sum < /usr/libexec/fwupd/efi/fwupdx64.efi)" = "$(sha256sum < /boot/EFI/BOOT/fwupdx64.efi)" ] && echo same' same
+# /boot is not a mount point in this layout (no fstab): the boot files live on
+# the ESP, and bootc finds the ESP by device scan at install and upgrade time.
+# So the file is checked on the ESP itself.
+check "fwupd's EFI is on the ESP (copied at install)" 'mkdir -p /run/esp && mount /dev/disk/by-partlabel/ESP /run/esp && cmp -s /usr/libexec/fwupd/efi/fwupdx64.efi /run/esp/EFI/BOOT/fwupdx64.efi && umount /run/esp && echo same' same
+check "the scratch partition was removed" 'lsblk -rno PARTLABEL /dev/vda | grep -c scratch' 0
 check "the first user was created" 'homectl list --no-legend | awk "{print \$1}"' alice
 check "the user is in wheel and the password works" 'PASSWORD="correct horse battery" homectl with alice -- id alice | grep -o "10(wheel)"' '10(wheel)'
 check "getent group wheel lists the user (merged sources)" 'getent group wheel' 'wheel:x:10:alice'

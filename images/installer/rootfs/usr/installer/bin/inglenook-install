@@ -302,7 +302,11 @@ fi
 say "Finishing"
 umount /var/tmp /scratch
 scratch_part=$(lsblk -rpno PATH,PARTLABEL "$DISK" | awk '$2 == "scratch" { print $1 }')
-sgdisk -d "$(cat /sys/class/block/"$(basename "$scratch_part")"/partition)" -q "$DISK" >/dev/null
+# sfdisk in script mode, not sgdisk: gptfdisk 1.0.10's `sgdisk -d N -q` silently
+# skips the deletion (it exits 0 and writes nothing), which once left the scratch
+# partition and its space on the installed disk. sfdisk takes no confirmation,
+# updates both GPT tables, and returns nonzero on failure.
+sfdisk "$DISK" --delete "$(cat /sys/class/block/$(basename "$scratch_part")/partition)"
 umount /target/boot /target
 [ "$INSTALL_ENCRYPT" = tpm2 ] && cryptsetup close root
 sync
