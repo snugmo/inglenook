@@ -9,11 +9,13 @@
 #   images/test/install-from-stick.sh [image-ref]    (default: the newest ghcr.io/snugmo/inglenook)
 #
 # Environment: ENCRYPT=0 (plain root instead of LUKS2 + TPM2), RAM (installer VM
-# memory, default 4G), KEY (ssh key the image trusts, default build/xfsvar/key,
-# the one the image of images/test/xfsvar.sh has baked in), STICK_REUSE=1 (keep
-# the stick of the last run), WORK (default build/install-from-stick),
-# ROOT_SIZE (default 8G; the rest of the disk becomes /var), OLD_DATA=0 (a blank target
-# disk; by default it holds an old filesystem and partitions, which the install wipes).
+# memory, default 4G), KEY (ssh key to log into the installed disk, default
+# build/xfsvar/key; its public half is handed to the VM, see vm.sh), STICK_REUSE=1
+# (keep the stick of the last run), WORK (default build/install-from-stick),
+# ROOT_SIZE (default 8G; the rest of the disk becomes /var), TARGET_SIZE (default 24G,
+# the target disk; it must fit the ESP + the root + a scratch that fits the image +
+# at least 2G of /var), OLD_DATA=0 (a blank target disk; by default it holds an old
+# filesystem and partitions, which the install wipes).
 set -euo pipefail
 
 HERE=$(cd "$(dirname "$0")" && pwd)
@@ -48,7 +50,7 @@ fi
 
 # --- the installer VM ---
 rm -rf tpm target.img serial.sock qmp.sock tpm.sock qemu.pid
-truncate -s "${TARGET_SIZE:-16G}" target.img
+truncate -s "${TARGET_SIZE:-24G}" target.img
 # Old data to be wiped: a labeled ext4 right where the new ESP will start (1 MiB) and an old
 # 'root' partition after it. OLD_DATA=0 for a blank disk.
 if [[ ${OLD_DATA:-1} == 1 ]]; then
