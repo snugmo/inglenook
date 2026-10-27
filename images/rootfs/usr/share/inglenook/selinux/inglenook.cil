@@ -28,6 +28,14 @@
 (allow policykit_auth_t user_devpts_t (chr_file (getattr)))
 (allow chkpwd_t user_devpts_t (chr_file (read write)))
 
+; tuned-ppd (the PPD-to-TuneD API translation daemon the image installs) writes
+; its own log, /var/log/tuned/tuned-ppd.log: the directory and file carry the
+; default var_log_t label, and the base policy grants tuned_t that access but
+; not tuned_ppd_t (write on the file is already allowed; only the directory
+; and the open of the new file were denied).
+(allow tuned_ppd_t var_log_t (dir (add_name write)))
+(allow tuned_ppd_t var_log_t (file (create open)))
+
 ; A login on the console (agetty and login): the PAM account check runs
 ; unix_chkpwd, which inherits the console tty.
 (allow chkpwd_t tty_device_t (chr_file (read write)))
