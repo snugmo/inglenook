@@ -1,13 +1,14 @@
 [Unit]
-Description=Create the XFS /var partition in the free space after the root
+Description=First-boot safety net: make the XFS /var partition in the free space after the root
 DefaultDependencies=no
 ConditionKernelCommandLine=inglenook.var=xfs
 ConditionPathExists=/etc/initrd-release
-# Without a TPM there is nothing to seal the volume to: skip cleanly (/var stays on the
-# root) instead of failing. After=tpm2.target and no Wants=: systemd-tpm2-generator hooks
-# the target in only when firmware reports a TPM whose device is not there yet, so this
-# waits for a slow driver and is a no-op on a machine without a TPM.
-ConditionPathExists=/dev/tpmrm0
+# No TPM condition here: the wrapper picks the definition (sealed to the TPM
+# when there is one, empty key slot otherwise), so the no-TPM path makes a
+# LUKS volume too instead of skipping. After=tpm2.target and no Wants=:
+# systemd-tpm2-generator hooks the target in only when firmware reports a TPM
+# whose device is not there yet, so this waits for a slow driver and is a
+# no-op on a machine without a TPM.
 After=tpm2.target
 After=sysroot.mount
 Requires=sysroot.mount
@@ -16,12 +17,11 @@ Before=bootc-root-setup.service
 [Service]
 Type=oneshot
 RemainAfterExit=yes
-# The definition is kept out of /usr/lib/repart.d on purpose: files there make
-# the stock systemd-repart.service run in the initrd, where it fails.
-# Idempotent: with the partition already there repart finds nothing to do. It
-# works on the disk that backs /sysroot, which is still the plain ext4 root at
-# this point (bootc-root-setup has not run).
-# A failure (no TPM, no free space) leaves /var on the root and is logged, not fatal.
-# --tpm2-public-key-pcrs= (empty): the UKI's signed PCR 11 key is in /run/systemd, and without this
-# repart would bind the volume to it ("PCR policy" is a later step, and the test VM's PCR 11 is not measured).
-ExecStart=-systemd-repart --tpm2-public-key-pcrs= --dry-run=no --root=/sysroot --definitions=/usr/lib/inglenook/repart.d --no-pager
+# The definitions are kept out of /usr/lib/repart.d on purpose: files there
+# make the stock systemd-repart.service run in the initrd, where it fails.
+# Idempotent: on a fresh install the installer already made the partition, so
+# repart finds nothing to do. When it does create one, it works on the disk
+# that backs /sysroot, which is still the plain root filesystem at this point
+# (bootc-root-setup has not run).
+# A failure (no free space) leaves /var on the root and is logged, not fatal.
+ExecStart=-/usr/lib/inglenook/var-repart
