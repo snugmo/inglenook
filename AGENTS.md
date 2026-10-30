@@ -134,6 +134,7 @@ This file holds only the context useful for *any* work in this repo. As the imag
 
 - **docs/tokens.md** — hardware-token logins: homed + FIDO2/PKCS#11, pam-u2f, what was tested with the software token and the limits.
 - **docs/installer.md** — the installer stick: one FAT32 partition, the UKI addon, `inglenook-install`, the first user, the tests (replaced the live stick).
+- **docs/encryption.md** — how the initrd unlocks the LUKS root (gpt-auto-generator, cryptsetup-generator, the options that can and cannot be injected), systemd-cryptsetup's unlock order and FIDO2's hard token gate, LUKS2 header/keyslot facts, and the proposed no-TPM2 FIDO2 path (a per-image-variant static drop-in in the initrd; no per-machine kargs — a locked-down type-2 UKI has none — and no wrapper).
 
 Planned (to be created when needed):
 
