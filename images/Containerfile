@@ -26,6 +26,11 @@ FROM registry.fedoraproject.org/fedora-bootc:${FEDORA_VERSION} AS pre
 ARG FEDORA_VERSION
 ARG VERSION=latest
 ARG REVISION=unknown
+# The image variant (images/build.sh): which static options the initrd's
+# drop-in uses to unlock an encrypted root - TPM-sealed (tpm2) or FIDO2 /
+# empty key (no-tpm). Recorded as a label so the installer stick made from
+# this image (images/installer/stick.sh) marks its addon with the same.
+ARG VARIANT=tpm2
 
 LABEL org.opencontainers.image.title="inglenook" \
       org.opencontainers.image.description="A Fedora-based bootc operating system image" \
@@ -38,7 +43,8 @@ LABEL org.opencontainers.image.title="inglenook" \
       org.opencontainers.image.ref.name="inglenook" \
       org.opencontainers.image.version="${VERSION}" \
       org.opencontainers.image.revision="${REVISION}" \
-      org.opencontainers.image.base.name="registry.fedoraproject.org/fedora-bootc:${FEDORA_VERSION}"
+      org.opencontainers.image.base.name="registry.fedoraproject.org/fedora-bootc:${FEDORA_VERSION}" \
+      io.github.snugmo.inglenook.variant="${VARIANT}"
 
 # Base image fixups, so the boot journal is clean on a read-only root:
 # tmpfiles.d (rpm-ostree-0-integration.conf) wants /usr/local/sbin, which the
