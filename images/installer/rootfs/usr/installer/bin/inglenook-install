@@ -4,16 +4,23 @@
 # from the stick except while the image is read from it).
 #
 # Steps: find the image on the stick, pick the disk (shown in full, wiped only
-# after a clear confirmation), partition it with systemd-repart (ESP, root of
-# the chosen size, a scratch partition; the rest stays free for /var, which the
-# installed system's initrd creates on its first boot), encrypt the root with
-# the TPM, copy the image off the stick, let go of the stick, `bootc install`, and
-# leave a credential that creates the first (systemd-homed) user on the first boot:
-# the root account is locked and there is no other account, so without it nobody
-# could log in.
+# after a clear confirmation), generate the machine id that identifies the new
+# system, partition the disk with systemd-repart seeded by that id (ESP, root of
+# the chosen size, /var on LUKS with XFS in all remaining space), and use /var
+# itself as the scratch space: open it, copy the image off the stick, let go of
+# the stick, `bootc install` into the root, write the machine id into the new
+# system, and clean /var again so it starts empty. Everything the installed
+# system needs is done here, on the first boot it just boots.
+#
+# The two image variants differ in how a disk without a TPM is encrypted:
+# the tpm2 variant (the default) leaves the root unencrypted, and the no-tpm
+# variant makes it a LUKS2 volume with an empty key slot that unlocks
+# hands-off and can receive a FIDO2 token later. /var is LUKS2 either way:
+# sealed to the machine's TPM when there is one, empty slot otherwise.
 #
 # Questions are skipped when their answer is in the environment (the tests do
-# that): INSTALL_DISK, INSTALL_ROOT_SIZE (50G), INSTALL_ENCRYPT (tpm2|none),
+# that): INSTALL_DISK, INSTALL_ROOT_SIZE (50G), INSTALL_ENCRYPT (tpm2|none on
+# the tpm2 variant, luks|none on the no-tpm variant),
 # INSTALL_RECOVERY_KEY (1|0), INSTALL_TOKEN (1|0: enrol a FIDO2 key for the first user at the first boot), INSTALL_USER / INSTALL_REALNAME / INSTALL_USER_PASSWORD
 # (the first user; INSTALL_NO_USER=1 skips it), INSTALL_YES=1 (assume yes everywhere,
 # including the wipe), INSTALL_NO_REBOOT=1, INSTALL_TARGET_IMGREF, INSTALL_IMAGE_DIR.
@@ -50,6 +57,12 @@ gib() { echo $(( $1 / 1073741824 )); }
 
 [ "$(id -u)" = 0 ] || die "run as root"
 
+# The image variant the stick was built from: the no-tpm variant's UKI carries a
+# marker in its own initrd, the tpm2 variant's does not.
+VARIANT=tpm2
+[ -f "$IN/variant" ] && VARIANT=$(cat "$IN/variant")
+[ "$VARIANT" = tpm2 ] || [ "$VARIANT" = no-tpm ] || die "Unknown image variant '$VARIANT' (the marker in $IN/variant)."
+
 # --- 1. The image on the stick -------------------------------------------------
 find_image() {
   [ -n "${INSTALL_IMAGE_DIR:-}" ] && { SRC=$INSTALL_IMAGE_DIR; SRCDEV=; return 0; }
@@ -74,7 +87,8 @@ TARGET_IMGREF=${INSTALL_TARGET_IMGREF:-$(cat "$IMG/target-imgref" 2>/dev/null ||
 [ -n "$TARGET_IMGREF" ] || die "No target image reference (set INSTALL_TARGET_IMGREF or provide $IMG/target-imgref)."
 echo "    updates will come from: $TARGET_IMGREF"
 IMG_BYTES=$(cat "$IMG"/image.oci.tar.* | wc -c)
-# the extracted layout plus bootc's temporary files
+# the extracted layout plus bootc's temporary files: /var doubles as this scratch space,
+# so /var must be at least this big
 SCRATCH_GIB=$(( (IMG_BYTES * 3 / 2) / 1073741824 + 2 ))
 SRC_DISK=
 [ -n "${SRCDEV:-}" ] && SRC_DISK=/dev/$(lsblk -no PKNAME "$SRCDEV" | head -1)
@@ -122,13 +136,17 @@ fi
 
 # --- 4. Sizes ---------------------------------------------------------------------------------
 esp_gib=$(numfmt --from=iec --to-unit=1073741824 "$ESP_SIZE")
-max_root_gib=$(( $(gib "$DISK_BYTES") - esp_gib - SCRATCH_GIB - MIN_VAR_GIB - 1 ))
-[ "$max_root_gib" -ge "$MIN_ROOT_GIB" ] || die "$DISK is too small: it needs about $((MIN_ROOT_GIB + esp_gib + SCRATCH_GIB + MIN_VAR_GIB + 1)) GiB."
+# /var takes all the space after the root, and it also holds the image while it is
+# being copied off the stick, so it must fit the scratch: the most the root can
+# have leaves that much (plus a GiB of alignment slack) for /var.
+var_min_gib=$(( SCRATCH_GIB > MIN_VAR_GIB ? SCRATCH_GIB : MIN_VAR_GIB ))
+max_root_gib=$(( $(gib "$DISK_BYTES") - esp_gib - var_min_gib - 1 ))
+[ "$max_root_gib" -ge "$MIN_ROOT_GIB" ] || die "$DISK is too small: it needs about $((MIN_ROOT_GIB + esp_gib + var_min_gib + 1)) GiB."
 def_root=$DEFAULT_ROOT
 [ "$(numfmt --from=iec --to-unit=1073741824 "$def_root")" -le "$max_root_gib" ] || def_root=${max_root_gib}G
 echo
 echo "The root filesystem holds the system image and its state. Everything else on the disk"
-echo "becomes /var (encrypted, created on the first boot); $max_root_gib GiB is the most the root can have here."
+echo "becomes /var (XFS on an encrypted volume, created now); $max_root_gib GiB is the most the root can have here."
 ask INSTALL_ROOT_SIZE "Size of the root" "$def_root"
 ROOT_BYTES=$(numfmt --from=iec "$INSTALL_ROOT_SIZE" 2>/dev/null) || die "'$INSTALL_ROOT_SIZE' is not a size (examples: 50G, 64G)."
 root_gib=$(gib "$ROOT_BYTES")
@@ -136,7 +154,13 @@ root_gib=$(gib "$ROOT_BYTES")
 
 # --- 5. Encryption ------------------------------------------------------------------------------
 if [ -z "${INSTALL_ENCRYPT:-}" ]; then
-  if [ -c /dev/tpmrm0 ]; then
+  if [ "$VARIANT" = no-tpm ]; then
+    # This image is built to boot without a TPM: the root is a LUKS2 volume with an
+    # empty key (a FIDO2 token or a recovery key can be enrolled later), never
+    # sealed to the TPM even when there is one.
+    [ -c /dev/tpmrm0 ] && echo "    This is the no-TPM image: a TPM, if there is one, is not used. Use the tpm2 image for a TPM-sealed disk."
+    INSTALL_ENCRYPT=luks
+  elif [ -c /dev/tpmrm0 ]; then
     yes_no "Encrypt the disk, unlocked by this machine's TPM (recommended)?" y && INSTALL_ENCRYPT=tpm2 || INSTALL_ENCRYPT=none
   else
     warn "No TPM 2.0 found: the disk cannot be sealed to this machine."
@@ -144,12 +168,35 @@ if [ -z "${INSTALL_ENCRYPT:-}" ]; then
     INSTALL_ENCRYPT=none
   fi
 fi
-[ "$INSTALL_ENCRYPT" = tpm2 ] && [ ! -c /dev/tpmrm0 ] && die "TPM encryption was asked for, but there is no /dev/tpmrm0."
+# root_encrypt: how the root partition is made (repart's Encrypt=); var_encrypt: the same
+# for /var, which is encrypted whatever the root is (tpm2 when there is a TPM to seal to,
+# an empty key slot otherwise - it unlocks with the empty password until a FIDO2 token
+# or a recovery key is enrolled).
+case "$INSTALL_ENCRYPT" in
+  tpm2)
+    [ "$VARIANT" = tpm2 ] || die "The $VARIANT image does not seal to the TPM (INSTALL_ENCRYPT is luks or none)."
+    [ -c /dev/tpmrm0 ] || die "TPM encryption was asked for, but there is no /dev/tpmrm0."
+    root_encrypt=tpm2 var_encrypt=tpm2
+    ;;
+  luks)
+    [ "$VARIANT" = no-tpm ] || die "TPM-less LUKS (INSTALL_ENCRYPT=luks) is only on the no-tpm image."
+    root_encrypt=key-file var_encrypt=key-file
+    ;;
+  none)
+    root_encrypt=
+    [ -c /dev/tpmrm0 ] && var_encrypt=tpm2 || var_encrypt=key-file
+    ;;
+  *) die "'$INSTALL_ENCRYPT' is not an encryption mode ($([ "$VARIANT" = tpm2 ] && echo 'tpm2, none' || echo 'luks, none'))." ;;
+esac
+if [ -n "$root_encrypt" ]; then
+  case $root_encrypt in
+    tpm2) root_desc='LUKS2, key sealed to the TPM';;
+    key-file) root_desc='LUKS2, empty key (a FIDO2 token can be enrolled later)';;
+  esac
+fi
 RECOVERY=
-if [ "$INSTALL_ENCRYPT" = tpm2 ]; then
-  if [ -z "${INSTALL_RECOVERY_KEY:-}" ]; then
-    yes_no "Create a recovery key (needed if the TPM is ever cleared or the board replaced)?" y && INSTALL_RECOVERY_KEY=1 || INSTALL_RECOVERY_KEY=0
-  fi
+if [ "$INSTALL_ENCRYPT" = tpm2 ] && [ -z "${INSTALL_RECOVERY_KEY:-}" ]; then
+  yes_no "Create a recovery key (needed if the TPM is ever cleared or the board replaced)?" y && INSTALL_RECOVERY_KEY=1 || INSTALL_RECOVERY_KEY=0
 fi
 
 # --- 5b. The first user ----------------------------------------------------------------------------
@@ -169,7 +216,7 @@ if [ -z "${INSTALL_NO_USER:-}" ]; then
   if [ -n "${INSTALL_USER:-}" ]; then
     FIRST_USER=$INSTALL_USER
     [[ $FIRST_USER =~ ^[a-z_][a-z0-9_-]{0,30}$ ]] || die "'$FIRST_USER' is not a usable username (lowercase letters, digits, - and _; at most 31)."
-    case $FIRST_USER in root|nobody) die "'$FIRST_USER' is reserved.";; esac
+    case $FIRST_USER in root|nobody) die "'$FIRST_USER' is reserved."; esac
     # Names the image has as users or groups (the stick's accounts file): a homed account
     # with one of them would be refused at the first boot, after the install.
     if [ -f "$IMG/accounts" ] && grep -qxF -- "$FIRST_USER" "$IMG/accounts"; then
@@ -204,44 +251,72 @@ sgdisk -Z -q "$DISK" >/dev/null 2>&1 || true
 wipefs -a -q "$DISK"
 udevadm settle
 
-say "Partitioning: ESP $ESP_SIZE, root ${root_gib}G$([ "$INSTALL_ENCRYPT" = tpm2 ] && echo ' (LUKS2, key sealed to the TPM)'), scratch ${SCRATCH_GIB}G (temporary), the rest free for /var"
+# The machine id: generated here, before the partitions exist. It seeds
+# systemd-repart, which derives every partition, LUKS and filesystem UUID from
+# it (HMAC-SHA256), so the layout is a stable function of the machine's
+# identity, and it becomes the new system's /etc/machine-id (written in step 8).
+# It must not be null: repart would then seed with a random id, and the
+# first-boot initrd (reading a not-yet-set /etc/machine-id) would derive
+# different UUIDs and refuse the existing layout.
+MACHINE_ID=$(uuidgen | tr -d '-' | tr 'A-F' 'a-f')
+say "Partitioning: ESP $ESP_SIZE, root ${root_gib}G${root_desc:+ ($root_desc)}, /var the rest ($([ "$var_encrypt" = tpm2 ] && echo 'XFS on LUKS2, sealed to the TPM' || echo 'XFS on LUKS2, empty key'))"
 rm -rf "$RUN/repart.d"; mkdir -p "$RUN/repart.d"
 cp "$IN"/repart.d/*.conf "$RUN/repart.d/"
 # The committed definitions carry the shape of the partitions; systemd-repart's config
 # files take no run-time values (and the root cannot use a SupplementFor= file, which
 # is forbidden together with its Encrypt=tpm2), so what the installer knows now is
-# appended to the copies: the chosen root size and, if selected, the LUKS2 encryption,
-# and a scratch size that fits the image.
+# appended to the copies: the chosen root size, and the LUKS2 encryption of the root
+# and of /var.
 {
   printf 'SizeMinBytes=%s\nSizeMaxBytes=%s\n' "$ROOT_BYTES" "$ROOT_BYTES"
-  if [ "$INSTALL_ENCRYPT" = tpm2 ]; then printf 'Encrypt=tpm2\n'; fi
+  [ -n "$root_encrypt" ] && printf 'Encrypt=%s\n' "$root_encrypt"
 } >> "$RUN/repart.d/10-root.conf"
-printf 'SizeMinBytes=%sG\nSizeMaxBytes=%sG\n' "$SCRATCH_GIB" "$SCRATCH_GIB" >> "$RUN/repart.d/90-scratch.conf"
-# composefs needs fs-verity on the root filesystem. --tpm2-public-key-pcrs= (empty): do not bind the root
-# to the UKI's signed PCR 11 key, which systemd-repart would otherwise pick up from /run/systemd.
-# --copy-source=/ resolves the definitions' CopyFiles= sources (the ESP's fwupdx64.efi) against the
-# installer's own root: in the initrd repart would default to /sysroot, which is empty here.
+printf 'Encrypt=%s\n' "$var_encrypt" >> "$RUN/repart.d/60-var.conf"
+# --seed: derive all partition UUIDs (and the LUKS2 and filesystem UUIDs they
+# seed in turn) from the machine id, so the disk is a deterministic function of
+# the machine (repart's machine-id default would not work: the installer's
+# /sysroot has no machine id yet). --tpm2-public-key-pcrs= (empty): do not bind
+# the volumes to the UKI's signed PCR 11 key, which systemd-repart would
+# otherwise pick up from /run/systemd.
+# --copy-source=/ resolves the definitions' CopyFiles= sources (the ESP's
+# fwupdx64.efi) against the installer's own root: in the initrd repart would
+# default to /sysroot, which is empty here.
 SYSTEMD_REPART_MKFS_OPTIONS_EXT4='-O verity' systemd-repart --tpm2-public-key-pcrs= --copy-source=/ \
-  --empty=require --dry-run=no --pretty=no --definitions="$RUN/repart.d" "$DISK" >/dev/null
+  --seed="$MACHINE_ID" --empty=require --dry-run=no --pretty=no --definitions="$RUN/repart.d" "$DISK" >/dev/null
 udevadm settle
-for l in ESP root scratch; do for _ in $(seq 20); do [ -e "/dev/disk/by-partlabel/$l" ] && break; sleep 0.5; done; done
+for l in ESP root var; do for _ in $(seq 20); do [ -e "/dev/disk/by-partlabel/$l" ] && break; sleep 0.5; done; done
+[ -e /dev/disk/by-partlabel/ESP ] && [ -e /dev/disk/by-partlabel/root ] && [ -e /dev/disk/by-partlabel/var ] \
+  || die "A partition (ESP, root or var) did not appear after repartitioning."
 ROOTPART=/dev/disk/by-partlabel/root
 rootdev=$ROOTPART
-if [ "$INSTALL_ENCRYPT" = tpm2 ]; then
-  systemd-cryptsetup attach root "$ROOTPART" - tpm2-device=auto,headless=yes
-  rootdev=/dev/mapper/root
-  if [ "${INSTALL_RECOVERY_KEY:-0}" = 1 ]; then
-    RECOVERY=$(systemd-cryptenroll --recovery-key --unlock-tpm2-device=auto "$ROOTPART" | tail -1)
-    printf '\n  RECOVERY KEY (write it down, it is shown again at the end):\n\n      %s\n\n' "$RECOVERY"
-  fi
-fi
+case "$INSTALL_ENCRYPT" in
+  tpm2)
+    systemd-cryptsetup attach root "$ROOTPART" - tpm2-device=auto,headless=yes
+    rootdev=/dev/mapper/root
+    if [ "${INSTALL_RECOVERY_KEY:-0}" = 1 ]; then
+      RECOVERY=$(systemd-cryptenroll --recovery-key --unlock-tpm2-device=auto "$ROOTPART" | tail -1)
+      printf '\n  RECOVERY KEY (write it down, it is shown again at the end):\n\n      %s\n\n' "$RECOVERY"
+    fi
+    ;;
+  luks)
+    # no key material anywhere: the empty key slot answers the empty password
+    systemd-cryptsetup attach root "$ROOTPART" - try-empty-password=true
+    rootdev=/dev/mapper/root
+    ;;
+esac
+# /var is the scratch: its XFS holds the image and bootc's working files until
+# the install is done, then it is cleaned and starts as an empty /var.
+case "$var_encrypt" in
+  tpm2)    systemd-cryptsetup attach var /dev/disk/by-partlabel/var - tpm2-device=auto,headless=yes ;;
+  key-file) systemd-cryptsetup attach var /dev/disk/by-partlabel/var - try-empty-password=true ;;
+esac
 mkdir -p /target /scratch
 mount "$rootdev" /target
 mkdir -p /target/boot && mount /dev/disk/by-partlabel/ESP /target/boot
-mount /dev/disk/by-partlabel/scratch /scratch
+mount /dev/mapper/var /scratch
 
 # --- 7. Copy the image off the stick -----------------------------------------------------------------
-say "Copying the image from the stick (about $(( IMG_BYTES / 1048576 )) MiB)"
+say "Copying the image from the stick (about $(( IMG_BYTES / 1048576 )) MiB, into /var)"
 mkdir -p /scratch/oci /scratch/tmp
 cat "$IMG"/image.oci.tar.* | tar -x -C /scratch/oci
 # bootc reads the running root's ostree config the way it reads a container's; take the
@@ -257,19 +332,35 @@ say "Installing (bootc, composefs, systemd-boot)"
 mount --bind /scratch/tmp /var/tmp
 bootc install to-filesystem --composefs-backend --bootloader systemd --generic-image \
   --skip-fetch-check --source-imgref oci:/scratch/oci:latest --target-imgref "$TARGET_IMGREF" /target
+deploys=(/target/state/deploy/*/)
+[ ${#deploys[@]} = 1 ] && [ -d "${deploys[0]}etc" ] || die "Cannot find the deployment's /etc under /target/state/deploy."
+DEPLOY=${deploys[0]%/}
+# bootc finalized the target (fstrim, then mounted it read-only)
+mount -o remount,rw /target
+
+# The machine id of the new system: the same one that seeded the partition
+# UUIDs (step 6). It goes into the deployment's /etc (what the first boot's
+# initrd conditions and the deployment activation read) and into the top-level
+# /etc on the root if bootc left one there. Once set, the first boot is not a
+# first boot anymore: no machine id commit, no disk-encryption wizard - the
+# volumes already exist and their keys were decided here.
+say "Writing the machine id $MACHINE_ID"
+for f in "$DEPLOY/etc/machine-id" /target/etc/machine-id; do
+  [ -d "$(dirname "$f")" ] || continue
+  [ -e "$f" ] || : > "$f"
+  chmod u+w "$f" 2>/dev/null || true
+  printf '%s\n' "$MACHINE_ID" > "$f"
+  chmod 0444 "$f"
+done
+
 # The first user: a home.create.<name> credential in the new system's /etc/credstore (on the
 # encrypted root, readable by root only). systemd-homed-firstboot creates the account from it
 # on the first boot and the drop-in in the image deletes the file again. The record holds the
 # password hash, and the password itself in "secret" (homed needs it to create the home).
 if [ -n "$FIRST_USER" ]; then
   say "Leaving a credential for the first user '$FIRST_USER'"
-  deploys=(/target/state/deploy/*/)
-  [ ${#deploys[@]} = 1 ] && [ -d "${deploys[0]}etc" ] || die "Cannot find the deployment's /etc under /target/state/deploy."
-  DEPLOY=${deploys[0]%/}
-  # bootc finalized the target (fstrim, then mounted it read-only)
-  mount -o remount,rw /target
   # the root is encrypted as a whole: a plain directory home; otherwise homed's default (LUKS)
-  storage=; [ "$INSTALL_ENCRYPT" = tpm2 ] && storage=directory
+  storage=; [ -n "$root_encrypt" ] && storage=directory
   # perMachine: [] is not decoration: without the field, `homectl update --fido2-device=` on this record
   # (the first-boot token enrolment) fails with "Object field 'perMachine' has wrong type null".
   hash=$(printf '%s' "$FIRST_PW" | openssl passwd -6 -stdin)
@@ -285,13 +376,13 @@ if [ -n "$FIRST_USER" ]; then
   if [ "${FIRST_TOKEN:-0}" = 1 ]; then
     mkdir -p "$DEPLOY/etc/inglenook"; printf '%s\n' "$FIRST_USER" > "$DEPLOY/etc/inglenook/enroll-token"
   fi
-  # label it like the initrd's etc-restore does: strip the deployment prefix so the path matches /etc/...
+  # label them like the initrd's etc-restore does: strip the deployment prefix so the path matches /etc/...
   setfiles -m -F -r "$DEPLOY" -c "$DEPLOY"/etc/selinux/targeted/policy/policy.* \
-    "$DEPLOY/etc/selinux/targeted/contexts/files/file_contexts" "$DEPLOY/etc/credstore" "$DEPLOY/etc/subuid" "$DEPLOY/etc/subgid" \
+    "$DEPLOY/etc/selinux/targeted/contexts/files/file_contexts" "$DEPLOY/etc/machine-id" "$DEPLOY/etc/credstore" "$DEPLOY/etc/subuid" "$DEPLOY/etc/subgid" \
     $([ -d "$DEPLOY/etc/inglenook" ] && echo "$DEPLOY/etc/inglenook") \
     || warn "Could not label the credential; the first boot may log SELinux denials."
   echo "    credential: $(ls -ldZ "$DEPLOY/etc/credstore/home.create.$FIRST_USER" | cut -c1-120)"
-  [ "$INSTALL_ENCRYPT" = tpm2 ] || warn "The disk is not encrypted: the password sits in /etc/credstore until the first boot deletes it."
+  [ -n "$root_encrypt" ] || warn "The disk is not encrypted: the password sits in /etc/credstore until the first boot deletes it."
 fi
 if [ -d /sys/firmware/efi/efivars ] && command -v efibootmgr >/dev/null; then
   efibootmgr --quiet --create --disk "$DISK" --part 1 --label Inglenook --loader '\EFI\systemd\systemd-bootx64.efi' \
@@ -300,15 +391,13 @@ fi
 
 # --- 9. Tidy up ------------------------------------------------------------------------------------------------
 say "Finishing"
-umount /var/tmp /scratch
-scratch_part=$(lsblk -rpno PATH,PARTLABEL "$DISK" | awk '$2 == "scratch" { print $1 }')
-# sfdisk in script mode, not sgdisk: gptfdisk 1.0.10's `sgdisk -d N -q` silently
-# skips the deletion (it exits 0 and writes nothing), which once left the scratch
-# partition and its space on the installed disk. sfdisk takes no confirmation,
-# updates both GPT tables, and returns nonzero on failure.
-sfdisk "$DISK" --delete "$(cat /sys/class/block/$(basename "$scratch_part")/partition)"
+umount /var/tmp
+# /var is about to leave: take the image and the working files with it
+rm -rf /scratch/oci /scratch/tmp
+umount /scratch
+case "$var_encrypt" in tpm2|key-file) cryptsetup close var ;; esac
 umount /target/boot /target
-[ "$INSTALL_ENCRYPT" = tpm2 ] && cryptsetup close root
+[ -n "$root_encrypt" ] && cryptsetup close root
 sync
 say "Installation complete."
 if [ -n "$RECOVERY" ]; then
@@ -320,7 +409,14 @@ if [ -n "$FIRST_USER" ]; then
 else
   echo "  The first boot asks for the first user on the console; without one nobody can log in."
 fi
-echo "  The first boot also asks about a recovery key / FIDO2 token for /var (an empty answer skips it)."
+if [ "$var_encrypt" = tpm2 ]; then
+  echo "  To add a recovery key or a FIDO2 token for the /var volume later, use"
+  echo "  systemd-cryptenroll (run0) on /dev/disk/by-partlabel/var."
+elif [ "$var_encrypt" = key-file ]; then
+  echo "  The /var volume has an empty key and unlocks hands-off. To make it need a"
+  echo "  FIDO2 token (or a recovery key) instead, enrol one later with systemd-cryptenroll"
+  echo "  (run0) on /dev/disk/by-partlabel/var."
+fi
 if [ -z "${INSTALL_NO_REBOOT:-}" ]; then
   while [ -n "$SRC_DISK" ] && [ -b "$SRC_DISK" ]; do
     read -r -p "Unplug the USB stick, then press Enter to reboot (or type 'ignore'): " reply || break
