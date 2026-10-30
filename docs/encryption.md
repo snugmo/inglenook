@@ -3,7 +3,7 @@
 How the initrd unlocks the LUKS root, and what levers exist (and what are traps) for
 changing the options it passes to `systemd-cryptsetup`. Hard-won from reading the
 systemd 262 source and extracting the initrd; the no-TPM2 FIDO2 path at the bottom is
-proposed, not built.
+proposed, not built. Line references are to the v262 source tree.
 
 ## The init in the initrd is systemd
 
@@ -28,9 +28,11 @@ FIDO2 libraries, HID modules), not in the installer addon.
    initrd) reads `root=` and generates `systemd-cryptsetup@root.service` with
    `ExecStart=/usr/bin/systemd-cryptsetup attach root /dev/gpt-auto-root-luks <keyfile>
    <options>` — the generator invokes the **absolute path** (meson's `bindir`), and the
-   `<options>` come from a **closed set** in `add_cryptsetup()`: `read-only` (if the
-   root is not RW), `tpm2-device=auto` (if `efi_measured_os() > 0`) and the PCR
-   measure flags. There is no karg or config file that adds to that set. Drop-ins
+   `<options>` come from a **closed set** in `add_cryptsetup()` (line 70): `read-only`
+   (if the root is not RW), `tpm2-device=auto` (if `efi_measured_os() > 0` —
+   `efi-loader.c:309`: the `SYSTEMD_FORCE_MEASURE` env, the
+   `systemd.tpm2_measured_os=` karg, or the `StubPcrKernelImage` stub variable) and the
+   PCR measure flags. There is no karg or config file that adds to that set. Drop-ins
    are different: they are collected for a unit regardless of which fragment won
    the load-path race, and a drop-in may add other `[Service]` keys (the
    template's `credential.conf` adds `ImportCredential=`) *and* clear and replace
@@ -52,8 +54,9 @@ FIDO2 libraries, HID modules), not in the installer addon.
   it cannot carry `try-empty-password=` without breaking the mount.
 - There is no per-machine kernel-argument carrier in the *static* layer: systemd-boot
   v262 has **no kargs.d**, and `io.systemd.boot.kernel-cmdline-extra` is read **only
-  from SMBIOS type 11** (`smbios_find_oem_string` in `boot.c`) — present in the test
-  VMs (QEMU), absent on machines. The UKI's baked-in command line is part of the
+  from SMBIOS type 11** (`smbios_find_oem_string` in `boot.c:3079`, and only for
+  `LOADER_LINUX` — type-1 — entries) — present in the test VMs (QEMU), absent on
+  machines. The UKI's baked-in command line is part of the
   image, so it cannot carry a per-machine LUKS UUID. For *type-1* entries the
   per-machine carrier is the deployment's **BLS `options=` line** on the ESP:
   bootc writes it at install time (`install to-filesystem --karg=…`) and
@@ -81,6 +84,11 @@ options (a crypttab option since v246); (4) prompt the user.
   through to a password prompt (only `-EAGAIN` from a token plugin does). Once a FIDO2
   token is enrolled in a volume, a boot without the token is a hard failure — that is
   the intended fail-closed behaviour, but it must be planned for.
+- **TPM2 never blocks.** In v262 any form of TPM2 attach failure is mangled to a
+  non-fatal `-EAGAIN` ("Mangle error code: let's make any form of TPM2 failure
+  non-fatal", cryptsetup.c ~2010) — no chip, no TPM2 token, PIN failure — and the
+  retry loop continues to the next method. That is why a tpm2 root that loses its TPM
+  still ends at the passphrase prompt.
 - **The empty password only works through the `try-empty-password=` flag** — it is
   never tried otherwise, and with no key, no token and no flag the unit simply prompts
   (which in the initrd is a hang: nothing answers the console).
@@ -93,6 +101,10 @@ options (a crypttab option since v246); (4) prompt the user.
 
 - `luksFormat --key-file /dev/null` is **rejected** ("Nothing to read on input"); a
   **zero-byte regular file** works as a key file, for format and for open.
+- A **TPM2** keyslot (repart `Encrypt=tpm2`, `repart.c:~5849`) is keyed by the
+  *base64-encoded TPM2 secret*, not by an empty string — so `try-empty-password`
+  on such a volume is a guaranteed *failed* attempt that falls through to the
+  TPM2/PIN/prompt paths, never an unlock.
 - LUKS2 tokens (FIDO2, TPM2, PKCS#11) live in the volume's 1 MiB JSON header,
   **independent of keyslots**. Enrolling a token adds no keyslot and wipes none, and
   the enrolled set is readable without unlocking: `dd if=<dev> bs=1M count=1 | grep
@@ -129,9 +141,9 @@ hands-off (the empty slot); the first user then enrolls a FIDO2 token and wipes
 the empty slot (end of this section).
 
 **Locked-down boot leaves no kargs channel.** For a type-2 entry systemd-boot marks
-the embedded command line `options_implied` and passes nothing to the PE
-(`call_image_start`: `options_initrd ?: options_implied ? NULL : options`) — the
-stub boots with its own signed, measured command line. Even the QEMU test channel
+the embedded command line `options_implied` (`boot.c:2526`) and passes nothing to the
+PE (`call_image_start`, `boot.c:3077`: `options_initrd ?: options_implied ? NULL :
+options`) — the stub boots with its own signed, measured command line. Even the QEMU test channel
 (`io.systemd.boot.kernel-cmdline-extra`) is gated to `LOADER_LINUX` (type-1)
 entries, so a type-2 UKI has zero kargs injection points — on machines *and* in the
 test VMs. A fixed LUKS2 UUID would not save a kargs scheme either: repart derives
@@ -145,24 +157,25 @@ modes.
 
 **The static carrier that works is a drop-in.** A unit's drop-ins are collected
 from *every* directory in the search path regardless of which fragment won the
-load-path race (`unit_find_dropin_paths` → `unit_file_find_dirs`: the unit's own
-name, its template, and the type-level dir), so a drop-in shipped in the image's
-initrd applies to gpt-auto's generated `systemd-cryptsetup@root.service` — and a
-drop-in may clear and replace `ExecStart=`.
+load-path race (`unit_find_dropin_paths`, load-dropin.c:16 → `unit_file_find_dirs`,
+dropin.c:144-176: the unit's own name, its template, and the type-level dir), so a
+drop-in shipped in the image's initrd applies to gpt-auto's generated
+`systemd-cryptsetup@root.service` — and a drop-in may clear and replace
+`ExecStart=`.
 
 **But one drop-in for all modes is not enough: the safe option sets are
 mode-specific, and the two modes' sets are mutually exclusive.** The tempting
 static superset (`tpm2-device=auto,tpm2-measure-pcr=…,fido2-device=auto,
 try-empty-password=true`) breaks, because *measurement* and the token *plugins*
-are exclusive: `use_token_plugins()` returns false whenever
+are exclusive: `use_token_plugins()` (cryptsetup.c:1401) returns false whenever
 `tpm2-measure-pcr=`/`tpm2-measure-keyslot-nvpcr=` is set ("there's no way to
 query the volume key when plugins are used"), which sends FIDO2 auto-discovery to
 the **in-tree** path — and the in-tree path returns a **fatal** `-ENXIO` ("No
 valid FIDO2 token data found") when the header has *no* FIDO2 token, whereas the
 plugin path converts exactly that to `-EAGAIN` and falls through. `verb_attach`'s
-retry loop continues only on `-EAGAIN` (`if (r != -EAGAIN) return r;`) — so a
-fresh no-TPM root (empty slot only, no token yet: the exact first-boot state)
-fails its boot at the FIDO2 step. The superset also degrades a tpm2 root that
+retry loop continues only on `-EAGAIN` (`if (r != -EAGAIN) return r;`, line ~2686),
+so a fresh no-TPM root (empty slot only, no token yet: the exact first-boot
+state) fails its boot at the FIDO2 step. The superset also degrades a tpm2 root that
 lost its TPM: today that ends at the passphrase prompt (a recovery key can still
 answer), with the superset the in-tree FIDO2 `-ENXIO` kills the unit first.
 
@@ -186,7 +199,7 @@ volume:
 
 | state | what the attach does |
 | --- | --- |
-| **fresh** (empty slot only, no token) | the FIDO2 plugin finds no `systemd-fido2` metadata → `-ENXIO`/`-ENOENT`/`-ENOTUNIQ` → converted to `-EAGAIN` and dropped immediately (the 30-second monitor only starts when a token *is* in the header) → `try-empty-password` unlocks. Hands-off. |
+| **fresh** (empty slot only, no token) | the FIDO2 plugin finds no `systemd-fido2` metadata → `-ENXIO`/`-ENOENT`/`-ENOTUNIQ` → converted to `-EAGAIN` (cryptsetup-token-systemd-fido2.c:130) and dropped immediately (the 30-second monitor only starts when a token *is* in the header) → `try-empty-password` unlocks. Hands-off. |
 | **enrolled, token present** | the plugin unlocks the volume key; the PIN comes through ask-password (the `cryptsetup.fido2-pin` credential, or the plymouth prompt). |
 | **enrolled, token absent** | the plugin's device enumeration finds nothing (`FIDO_ERR_INTERNAL` → synthetic `-EAGAIN`) → the 30-second udev monitor → the unit fails. Fail-closed, the intended behaviour. |
 | **unencrypted install from this image** | no `crypto_LUKS` partition → gpt-auto generates no cryptsetup unit → the drop-in (with no fragment to attach to) is inert. |
