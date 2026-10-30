@@ -1,12 +1,26 @@
 #!/bin/sh
-# Unlock the encrypted XFS /var (partition label "var", made by inglenook-var-repart.service)
-# and mount it over the state directory bootc binds at /sysroot/var. When there is no such
-# partition (no free space after the root, or no TPM to seal its key to) /var stays on the
-# root filesystem and the boot goes on.
+# Unlock the LUKS2 /var volume and mount its XFS over the state directory
+# bootc-root-setup binds at /sysroot/var.
+#
+# A /var that has not been relabelled yet (no marker) is prepared here, before
+# switch-root: no SELinux policy is loaded in the initrd and the kernel cannot
+# assign labels (a mount rootcontext= fails silently without one), so the
+# directory skeleton the first services write into is created and labelled
+# from the target tree's policy and file contexts, the same way the factory
+# /etc restore does it. Files created later inherit their parent's label, so
+# the first boot never sees unlabeled_t under /var. The marker is dropped by
+# the main root's one-shot inglenook-var-relabel.service; while it exists,
+# both this preparation and that relabel are no-ops.
 udevadm settle
 if [ ! -e /dev/disk/by-partlabel/var ]; then
   echo "inglenook: no var partition; /var stays on the root filesystem"
   exit 0
 fi
-systemd-cryptsetup attach var /dev/disk/by-partlabel/var - tpm2-device=auto,fido2-device=auto,headless=yes || exit 1
-exec mount -t xfs -o nosuid,nodev,rootcontext=system_u:object_r:var_t:s0 /dev/mapper/var /sysroot/var
+systemd-cryptsetup attach var /dev/disk/by-partlabel/var - tpm2-device=auto,fido2-device=auto,try-empty-password=true,headless=yes || exit 1
+mount -t xfs /dev/mapper/var /sysroot/var || exit 1
+if [ ! -e /sysroot/var/.inglenook-relabelled ]; then
+  mkdir -p /sysroot/var/log/journal /sysroot/var/lib /sysroot/var/cache /sysroot/var/empty /sysroot/var/spool
+  setfiles -m -F -r /sysroot -c /sysroot/etc/selinux/targeted/policy/policy.* \
+    /sysroot/etc/selinux/targeted/contexts/files/file_contexts /sysroot/var \
+    || echo "inglenook: warning: could not label /var from the target tree's contexts"
+fi

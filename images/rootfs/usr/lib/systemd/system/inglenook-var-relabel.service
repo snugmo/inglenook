@@ -1,0 +1,22 @@
+[Unit]
+# First boot of a fresh /var: the initrd prepares the /var tree before
+# switch-root (var-mount: no SELinux policy is loaded there, so it creates the
+# directory skeleton and labels it from the target tree's contexts, which new
+# files then inherit), but the files created between switch-root and this
+# service still carry inherited labels (var_t, var_log_t, ...) that do not
+# match their paths; relabel the whole tree by path once the policy is in.
+# The marker in /var makes this a one-shot (it is gone again when /var is
+# wiped or recreated, which re-runs this and the initrd's preparation).
+DefaultDependencies=no
+After=systemd-tmpfiles-setup.service
+Before=basic.target plymouth-start.service shutdown.target
+Conflicts=shutdown.target
+ConditionPathExists=!/var/.inglenook-relabelled
+
+[Service]
+Type=oneshot
+ExecStart=/usr/sbin/restorecon -R /var
+ExecStart=/usr/bin/touch /var/.inglenook-relabelled
+
+[Install]
+WantedBy=basic.target

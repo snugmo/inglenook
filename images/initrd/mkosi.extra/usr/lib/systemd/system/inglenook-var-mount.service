@@ -13,6 +13,7 @@ Type=oneshot
 RemainAfterExit=yes
 # A service rather than a sysroot-var.mount unit: systemd tracks the bind mount
 # bootc already made at /sysroot/var, and skips a mount unit for that path.
-# rootcontext: a fresh XFS root is unlabeled, which SELinux denies everything
-# in; the kernel resolves the label once PID 1 loads the policy.
+# The script also labels a not-yet-relabelled /var from the target tree's
+# contexts (see the script: no policy is loaded in the initrd, so the labels
+# the first boot's files inherit have to be set before switch-root).
 ExecStart=/usr/lib/inglenook/var-mount
