@@ -18,7 +18,10 @@
 #
 # Environment: STICK_SIZE (default: the content plus 300 MiB, in whole GiB), PTYPE (sfdisk partition type for the
 # GPT partition: "U" EFI system, "L" Linux data, default "EBD0A0A2-B9E5-4433-87C0-68B6B72699C7"
-# basic data), WORK (default build/installer). Firmware boots the fallback path
+# basic data), WORK (default build/installer), VARIANT (the image variant to mark
+# in the addon; by default read from the image's io.github.snugmo.inglenook.variant
+# label, which build.sh sets: the addon's marker must match the image's initrd,
+# or the installed system would not boot). Firmware boots the fallback path
 # from any FAT partition; PTYPE=none writes no partition table at all.
 set -euo pipefail
 
@@ -27,6 +30,19 @@ REPO=$(cd "$HERE/../.." && pwd)
 WORK=${WORK:-$REPO/build/installer}
 ref=${1:?usage: stick.sh <image-ref>}
 PTYPE=${PTYPE:-EBD0A0A2-B9E5-4433-87C0-68B6B72699C7}
+
+# The variant the image was built as: it decides the marker file the installer
+# reads as /usr/installer/variant (and, already in the image's initrd, how an
+# encrypted root is unlocked). A stick made from the wrong variant would install
+# a system that cannot boot, so an explicit override that contradicts the label
+# is an error.
+image_variant=$(podman image inspect --format '{{json .Config.Labels}}' "$ref" 2>/dev/null \
+  | python3 -c 'import json, sys; print(json.load(sys.stdin).get("io.github.snugmo.inglenook.variant", ""))' 2>/dev/null) || image_variant=
+if [[ -n ${VARIANT:-} && -n ${image_variant:-} && $VARIANT != $image_variant ]]; then
+  echo "VARIANT=$VARIANT does not match the image's variant ($image_variant); the installed system would not boot." >&2
+  exit 1
+fi
+export VARIANT=${VARIANT:-${image_variant:-tpm2}}
 
 rm -rf "$WORK/tree"; mkdir -p "$WORK/tree/EFI/BOOT" "$WORK/tree/EFI/Linux" "$WORK/tree/loader/addons"
 c=$(podman create "$ref")

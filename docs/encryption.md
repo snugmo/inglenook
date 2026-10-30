@@ -3,7 +3,7 @@
 How the initrd unlocks the LUKS root, and what levers exist (and what are traps) for
 changing the options it passes to `systemd-cryptsetup`. Hard-won from reading the
 systemd 262 source and extracting the initrd; the no-TPM2 FIDO2 path at the bottom is
-proposed, not built. Line references are to the v262 source tree.
+built (the `no-tpm` image variant). Line references are to the v262 source tree.
 
 ## The init in the initrd is systemd
 
@@ -133,12 +133,14 @@ options (a crypttab option since v246); (4) prompt the user.
   initrd's systemd version does not match the image's, rebuild with a clean mkosi
   cache before chasing "missing feature" bugs.
 
-## The no-TPM2 FIDO2 path (proposed, not built yet)
+## The no-TPM2 FIDO2 path
 
 Install the root as LUKS2 with an **empty keyslot only** (repart `Encrypt=key-file`,
 no key file — the documented empty-key default) and no TPM2 token. First boot is
 hands-off (the empty slot); the first user then enrolls a FIDO2 token and wipes
-the empty slot (end of this section).
+the empty slot (end of this section). This is the **no-tpm** image variant
+(`VARIANT=no-tpm images/build.sh`; the choice is recorded as an image label and
+carried into the installer's addon, docs/installer.md).
 
 **Locked-down boot leaves no kargs channel.** For a type-2 entry systemd-boot marks
 the embedded command line `options_implied` (`boot.c:2526`) and passes nothing to the
@@ -188,7 +190,8 @@ options.** Two build variants (one build arg), one image per mode:
 | **no-TPM LUKS** (new) | one file in the initrd, `ExecStart=` cleared and replaced (see below) | no TPM2/measure options, so `use_token_plugins()` stays true (the initrd ships `libcryptsetup-token-systemd-{fido2,pkcs11,tpm2}.so` and `libfido2`), and the *plugin* FIDO2 path is the one that runs. |
 
 The no-TPM variant's drop-in (in the initrd,
-`/usr/lib/systemd/system/systemd-cryptsetup@root.service.d/`):
+`/usr/lib/systemd/system/systemd-cryptsetup@.service.d/` — the template's
+drop-in directory, which applies to every instance, `root` included):
 
     [Service]
     ExecStart=
@@ -215,17 +218,17 @@ static command line, the same unit starts, and `attach` on an already-active
 volume returns 0 ("Volume already active") before any token attempt. The
 drop-in ships in the initrd only; the rootfs needs nothing.
 
-The install side of the no-TPM variant: the installer's repart definition uses
-`Encrypt=key-file` with *no* `KeyFile=`/`--key-file=` (the documented
-zero-length-key default), skips the TPM2 cryptenroll, reads the derived LUKS2
-UUID from the formatted partition, opens it with `systemd-cryptsetup attach`
-(empty password), then `bootc install to-filesystem` as today.
+The install side of the no-TPM variant (docs/installer.md): the installer's repart
+runs with `--seed=` set to the machine id it generates (every partition, LUKS and
+filesystem UUID is derived from it), `Encrypt=key-file` appended to both the root
+and the /var definitions with *no* `KeyFile=`/`--key-file=` (the documented
+zero-length-key default), and opens both volumes with the empty password
+(`try-empty-password=true`) for the install itself. The tpm2 variant differs only
+in the `Encrypt=` values (`tpm2`) and the options the installer passes to its own
+`systemd-cryptsetup attach` calls.
 
-Costs and open items:
+Remaining open items:
 
-- Two image variants to build and publish (a build arg to `build.sh`/the
-  Containerfile); the installer stick is built from the variant matching the
-  chosen install mode (it takes the image ref anyway).
 - The drop-in couples the image to gpt-auto's device naming
   (`/dev/gpt-auto-root-luks`) and the volume name `root`; re-derive it at each
   systemd rebase (we pin the systemd version per release, so a rebase is the
@@ -238,10 +241,6 @@ Costs and open items:
 - A type-2 entry also loses the QEMU `kernel-cmdline-extra` console channel
   (type-1 only), so locked-down *test* images need `console=` baked into the
   UKI (a test-only build flag) or the tests keep the permissive type-1 layout.
-- `/var` in a no-TPM install — unencrypted, or its own attach options in
-  `inglenook-var-mount` — is still undecided.
-- The initrd's systemd (259 in the last extracted build) predates the image's
-  (262) — a stale mkosi build; clean rebuild before implementing.
 
 After first boot the first user enrolls a token on the booted system
 (`run0 systemd-cryptenroll --fido2-device=auto /dev/mapper/root`) and wipes

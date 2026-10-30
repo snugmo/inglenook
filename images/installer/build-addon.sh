@@ -14,10 +14,17 @@
 # separate addon with a .uname. systemd-stub loads addons from
 # \loader\addons\ on the partition it booted from. Secure Boot must be off
 # (unsigned addon, like the image's UKI).
+# Environment: VARIANT (tpm2|no-tpm, default tpm2): written into the overlay
+# as /usr/installer/variant, which inglenook-install reads to pick its
+# encryption options. The no-tpm image's initrd (which this addon is layered
+# over) carries the matching root-unlock drop-in, so the two must agree:
+# stick.sh passes the variant it read from the image's label.
 set -euo pipefail
 
 HERE=$(cd "$(dirname "$0")" && pwd)
 out=${1:?usage: build-addon.sh <out.addon.efi>}
+VARIANT=${VARIANT:-tpm2}
+[[ $VARIANT == tpm2 || $VARIANT == no-tpm ]] || { echo "VARIANT must be tpm2 or no-tpm (got '$VARIANT')" >&2; exit 1; }
 tmp=$(mktemp -d)
 # the unpacked boot initrd has read-only directories
 trap 'chmod -R u+w "$tmp" 2>/dev/null; rm -rf "$tmp"' EXIT
@@ -37,6 +44,8 @@ grep -vE '^(#|$)' "$HERE/exclude-packages.txt" | while read -r pkg; do
   rpm --root "$tmp/mkosi/installer" --dbpath /usr/lib/sysimage/rpm -ql "$pkg" | sed 's#^/##'
 done > "$tmp/excluded"
 python3 -I "$HERE/overlay.py" "$tmp/mkosi/installer" "$tmp/initrd" "$HERE/rootfs" "$tmp/overlay" "$tmp/excluded"
+# The variant marker (a build decision, so written here rather than in rootfs/).
+printf '%s\n' "$VARIANT" > "$tmp/overlay/usr/installer/variant"
 
 # Stable order, root ownership regardless of who builds.
 [[ -n ${LIST_OVERLAY:-} ]] && (cd "$tmp/overlay" && find . -type f -o -type l | sort) >&2

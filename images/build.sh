@@ -11,7 +11,12 @@
 # UKI's PCR 11 prediction; default dev-keys/pcr-{private,public}.pem, made with
 # `ukify genkey` when missing: a test key, never published),
 # SELINUX_ENFORCING (default 0 = permissive), SELINUX_NO_DONTAUDIT (default 0; 1 logs the dontaudit denials too),
-# FEDORA_VERSION, DEV_REGISTRY.
+# FEDORA_VERSION, DEV_REGISTRY,
+# VARIANT (default tpm2; no-tpm builds the other image variant: the initrd gains
+# the drop-in that unlocks the LUKS root with a FIDO2 token / empty slot instead
+# of the TPM, docs/encryption.md; the choice is recorded as an image label, and
+# the installer stick made from the image (images/installer/stick.sh) picks it
+# up to mark the addon).
 # Usage: images/build.sh [push]
 set -euo pipefail
 cd "$(dirname "$0")/.."
@@ -19,6 +24,8 @@ cd "$(dirname "$0")/.."
 NAME=inglenook
 REGISTRY=${DEV_REGISTRY:-ghcr.io/snugmo}
 FEDORA_VERSION=${FEDORA_VERSION:-45}
+VARIANT=${VARIANT:-tpm2}
+[[ $VARIANT == tpm2 || $VARIANT == no-tpm ]] || { echo "VARIANT must be tpm2 or no-tpm (got '$VARIANT')" >&2; exit 1; }
 VERSION=$(git describe --tags --always --dirty 2>/dev/null || true)
 VERSION=${VERSION#v}
 VERSION=${VERSION:-latest}
@@ -37,7 +44,8 @@ if [[ ! -f $PCR_PRIVATE_KEY || ! -f $PCR_PUBLIC_KEY ]]; then
 fi
 
 args=(--build-arg "VERSION=$VERSION" --build-arg "REVISION=$REVISION"
-      --build-arg "FEDORA_VERSION=$FEDORA_VERSION")
+      --build-arg "FEDORA_VERSION=$FEDORA_VERSION"
+      --build-arg "VARIANT=$VARIANT")
 [[ -n ${SELINUX_NO_DONTAUDIT:-} ]] && args+=(--build-arg "SELINUX_NO_DONTAUDIT=$SELINUX_NO_DONTAUDIT")
 
 # --layers: buildah defaults to no layer cache, and the later passes must reuse
@@ -58,13 +66,19 @@ podman cp "$c:/usr/lib/bootc/initramfs-setup" "$WORK/in/bootc/"
 podman cp "$c:/usr/lib/systemd/system/bootc-root-setup.service" "$WORK/in/units/"
 rm -f "$WORK/in/modules/vmlinuz" "$WORK/in/modules/initramfs.img"
 
+# The no-tpm variant adds one file to the initrd: the drop-in that replaces
+# gpt-auto-generator's root cryptsetup ExecStart (docs/encryption.md).
+extra_trees=( --extra-tree "$PWD/images/initrd/no-tpm:/usr/lib/systemd/system" )
+[[ $VARIANT == tpm2 ]] && extra_trees=()
+
 # SOURCE_DATE_EPOCH keeps the cpio timestamps stable across runs.
 SOURCE_DATE_EPOCH=${SOURCE_DATE_EPOCH:-$(git log -1 --format=%ct 2>/dev/null || echo 0)} \
 mkosi --directory images/initrd --force --build-sources= --release "$FEDORA_VERSION" \
   --output-directory "$PWD/$WORK/out" \
   --extra-tree "$PWD/$WORK/in/modules:/usr/lib/modules/$kver" \
   --extra-tree "$PWD/$WORK/in/bootc:/usr/lib/bootc" \
-  --extra-tree "$PWD/$WORK/in/units:/usr/lib/systemd/system"
+  --extra-tree "$PWD/$WORK/in/units:/usr/lib/systemd/system" \
+  "${extra_trees[@]}"
 args+=(--build-context "initrd=$WORK/out")
 
 build --target base -t "$BASE"
