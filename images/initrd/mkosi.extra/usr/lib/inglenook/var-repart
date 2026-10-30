@@ -1,0 +1,17 @@
+#!/bin/sh
+# The first-boot /var safety net: make the XFS /var partition in the free space
+# after the root. The installer already does all of this on a fresh install
+# (including sealing the volume), so this only creates the partition on a
+# system installed before that, or by `bootc install`, which has no installer.
+# Sealed to the TPM when there is one, empty key slot otherwise, so every
+# system ends up with an encrypted /var (no unencrypted fallback to maintain).
+# Idempotent: with the partition already there systemd-repart has nothing to do.
+if [ -c /dev/tpmrm0 ]; then
+  definitions=/usr/lib/inglenook/repart.d
+else
+  definitions=/usr/lib/inglenook/repart-no-tpm.d
+fi
+# --tpm2-public-key-pcrs= (empty): the UKI's signed PCR 11 key is in
+# /run/systemd, and without this repart would bind the volume to it (the PCR
+# policy is a later step, and the test VM's PCR 11 is not measured).
+exec systemd-repart --tpm2-public-key-pcrs= --dry-run=no --root=/sysroot --definitions="$definitions" --no-pager
