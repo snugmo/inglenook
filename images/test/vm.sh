@@ -234,7 +234,8 @@ cmd_ssh() {
 }
 
 cmd_avc() {
-  cmd_ssh 'journalctl -q -b --no-pager -o cat | grep -a "avc:  denied"' | "$HERE/avc-summary.py"
+  # || true: a boot with zero denials must not fail the pipeline
+  cmd_ssh 'journalctl -q -b --no-pager -o cat | grep -a "avc:  denied" || true' | "$HERE/avc-summary.py"
 }
 
 # The baseline lists the denials known today (the policy is being worked out, the
