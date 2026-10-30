@@ -119,5 +119,6 @@ console shell is an interactive bash: a `!!` in a command is history expansion, 
 
 ## Not done yet
 
-Swap, FIDO2 enrollment of the encrypted volumes during the install, an unattended mode driven by a config file,
-a PCR policy for the TPM keys, LVM (an addon if ever needed), and any test on real hardware.
+Swap, a no-TPM2 LUKS mode with FIDO2 (docs/encryption.md, the proposed per-variant initrd drop-in), FIDO2 enrollment of the
+encrypted volumes during the install, an unattended mode driven by a config file, a PCR policy for the TPM
+keys, LVM (an addon if ever needed), and any test on real hardware.
