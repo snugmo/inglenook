@@ -35,6 +35,26 @@ mount its disks (dm-crypt, TPM, FIDO2 libraries, HID modules) belongs in the boo
 (`images/initrd/mkosi.conf`), not here.** Hardware support the installer needs beyond that
 (modules) would be another addon with a `.uname`.
 
+`build-addon.sh` also writes `/usr/installer/variant` into the overlay: the **image
+variant** (`tpm2` or `no-tpm`) the stick was built from. It comes from the image's
+`io.github.snugmo.inglenook.variant` label (set by `images/build.sh` from its `VARIANT`
+build arg; `stick.sh` reads the label and refuses an explicit override that contradicts
+it, since the marker must match the variant drop-in that is already in the image's
+initrd — a mismatch would install a system that cannot boot).
+
+## The two image variants
+
+Both images carry the whole installer; they differ in what an encrypted root means and
+in one initrd file:
+
+| | **tpm2** (the default) | **no-tpm** |
+| --- | --- | --- |
+| encrypted root | LUKS2, key sealed to the machine's TPM (`Encrypt=tpm2`) | LUKS2, an **empty key slot** (`Encrypt=key-file`, no key file): unlocks hands-off with the empty password, a FIDO2 token or recovery key can be enrolled later |
+| root options | `INSTALL_ENCRYPT=tpm2` (sealed, needs a TPM) or `none` (plain) | `INSTALL_ENCRYPT=luks` (empty slot) or `none` (plain) |
+| no TPM present | the tpm2 image offers a plain (unencrypted) root | the same: a plain root (`none`); the empty-slot mode does not need a TPM, so it is the default |
+| initrd unlock of an encrypted root | gpt-auto's generated unit as-is (TPM2 options on a measured boot, docs/encryption.md) | one drop-in (`images/initrd/no-tpm/`, added to the initrd only in this variant) replaces gpt-auto's `ExecStart=` with `fido2-device=auto,try-empty-password=true` — the documented no-TPM2 path in docs/encryption.md |
+| /var | LUKS2 either way (below) | LUKS2 either way (below) |
+
 ## Using it
 
 Boot the stick (the console shows a banner), then run `inglenook-install`. It:
@@ -44,28 +64,42 @@ Boot the stick (the console shows a banner), then run `inglenook-install`. It:
    a hint if it looks like Windows, LUKS or an earlier Inglenook). A disk with anything on it
    is erased only after you type its device name; an empty one after a yes. Disks with mounted
    filesystems are refused;
-3. asks for the root size (default 50G; the rest of the disk becomes the encrypted `/var`,
-   which the installed system's initrd creates on its first boot);
-4. encrypts with the TPM if there is one (`/dev/tpmrm0`), offering a recovery key; without a
-   TPM it asks before installing unencrypted;
+3. asks for the root size (default 50G, the most that leaves room for /var on this disk;
+   the rest of the disk becomes /var);
+4. asks how to encrypt, per the variant (above): TPM-sealed or plain on the tpm2 image,
+   empty-slot LUKS or plain on the no-tpm image, with a recovery key offered for the
+   TPM-sealed root;
 5. asks for the **first user** (below), because root is locked and there is no other account, so
    without one nobody could log in;
-6. wipes the disk, partitions it with `systemd-repart` from `/usr/installer/repart.d/`
-   (`00-esp.conf`, `10-root.conf`, `90-scratch.conf`: the shape of each partition is in the
-   committed definitions; the installer appends the chosen root size, `Encrypt=tpm2` when
-   selected, and a scratch size that fits the image: ext4 with fs-verity),
-   unpacks the image from the stick to the scratch partition, says the stick is no longer needed,
-   runs `bootc install to-filesystem` straight from the initrd (no container), adds a firmware boot
-   entry (`efibootmgr`, non-fatal), removes the scratch partition and asks for the stick to be
-   unplugged before the reboot.
+6. does the whole job, all in the initrd: wipes the disk, partitions it with
+   `systemd-repart` from `/usr/installer/repart.d/` (`00-esp.conf`, `10-root.conf`,
+   `60-var.conf`: the committed definitions carry the shape of each partition; the
+   installer appends the chosen root size and `Encrypt=` to its copies), with
+   `--seed=` set to the **machine id it generates** — every partition, LUKS and filesystem
+   UUID on the disk is a deterministic function of that one value (HMAC-SHA256, see the
+   systemd-repart man page). `/var` is all the space after the root, XFS on LUKS2
+   (sealed to the TPM when there is one, an empty key slot otherwise — there is no
+   unencrypted mode: an empty key is easier to manage than no layer, and a FIDO2 token
+   can be enrolled later without an encrypt-in-place). The installer opens the root and
+   /var, and **/var doubles as the scratch space**: it unpacks the image from the stick
+   into /var, says the stick is no longer needed, runs `bootc install to-filesystem`
+   straight from the initrd (no container), writes the machine id into the new system
+   (the deployment's `/etc`, so the first boot is not a first boot: no machine-id
+   commit, no disk-encryption wizard — the volumes already have the keys decided
+   here), adds a firmware boot entry (`efibootmgr`, non-fatal), empties /var again,
+   unmounts everything and asks for the stick to be unplugged before the reboot.
+   Because the machine id is written before the first boot, the initrd's /var safety
+   net (which makes the partition on a system installed *before* this installer, or by
+   plain `bootc install`) finds the partition already there and has nothing to do.
 
-Questions whose answer is in the environment are not asked (`INSTALL_DISK`, `INSTALL_ROOT_SIZE`,
-`INSTALL_ENCRYPT=tpm2|none`, `INSTALL_RECOVERY_KEY`, `INSTALL_USER`, `INSTALL_REALNAME`,
+Questions whose answer is in the environment are not asked (`INSTALL_DISK`,
+`INSTALL_ROOT_SIZE`, `INSTALL_ENCRYPT=tpm2|none` on the tpm2 variant, `luks|none` on the
+no-tpm one, `INSTALL_RECOVERY_KEY`, `INSTALL_USER`, `INSTALL_REALNAME`,
 `INSTALL_USER_PASSWORD`, `INSTALL_NO_USER=1`, `INSTALL_YES=1`, `INSTALL_NO_REBOOT=1`,
 `INSTALL_TARGET_IMGREF`, `INSTALL_IMAGE_DIR`); the tests use that.
 
-Measured in QEMU: about 45 s for the install itself, 276 MB peak in the RAM-backed root; it works
-with 2 GB of RAM (1 GB is not safe).
+Measured in QEMU: about 45 s for the install itself; the image copy lives on the target
+disk's own /var, so the RAM footprint is only the decompression.
 
 ## The first user
 
@@ -77,13 +111,14 @@ systemd-homed account:
   new system's `/etc/credstore` (that is under `/state/deploy/<digest>/etc` on the root, so it is on the
   encrypted volume, mode 0600, SELinux-labeled with `setfiles` like the initrd does). The record is in
   the `wheel` group (so `run0` works), has `/bin/bash` as shell, and holds the password hash plus the
-  password itself in its `secret` section: homed needs the secret to create a home.
+  password itself in its `secret` section: homed needs the secret to create the home.
 - **On the first boot:** `systemd-homed-firstboot.service` (enabled in the image, drop-in
   `10-inglenook.conf`) runs `homectl firstboot`, which creates the account from the credential without
   asking, and the drop-in deletes the credential afterwards. The unit does not use
   `ConditionFirstBoot=`: the image ships an empty `/etc/machine-id`, which systemd treats as "not a first
-  boot" (machine-id(5)); it runs while homed has no record. The home is a plain directory when the root
-  is encrypted (it already is), homed's default (a LUKS image) when it is not.
+  boot" (machine-id(5)) — though a stick install no longer relies on that: it writes the machine id
+  itself, and the homed wizard runs while homed simply has no regular user yet. The home is a plain
+  directory when the root is encrypted (it already is), homed's default (a LUKS image) when it is not.
 - **Skipped in the installer:** the same service prompts on the console on the first boot (username and
   password; the account joins `wheel`). Nothing is stored anywhere before that. To add users later from an
   existing login: `homectl create <name> --member-of=wheel`.
@@ -96,9 +131,14 @@ systemd-homed account:
 
 - `images/test/installer-env.sh`: the addon on a stick without the image: root shell in the initrd,
   banner, every installer tool runs.
-- `images/test/install-from-stick.sh`: the whole install onto a disk that holds old data, TPM-sealed
-  root and a first user, the stick pulled over QMP as soon as it is no longer needed, then the disk booted
-  alone: the account exists, is in `wheel`, takes the password and not a wrong one, and the credential is gone.
+- `images/test/install-from-stick.sh`: the whole install onto a disk that holds old data, a first
+  user, the stick pulled over QMP as soon as it is no longer needed, then the disk booted
+  alone: the root and /var volumes are in the state the chosen `ENCRYPT=tpm2|luks|none`
+  promises (TPM2 token, empty slot, or plain), /var is XFS, the account exists, is in
+  `wheel`, takes the password and not a wrong one, and the credential is gone. `luks`
+  needs a stick made from the no-tpm image variant (the tpm2 installer refuses it), and
+  that run also exercises the variant's FIDO2/empty-slot root unlock drop-in
+  (docs/encryption.md), since the installed disk boots without a TPM.
 - `images/test/install-safety.sh`: everything `inglenook-install` does before it erases: what it shows,
   the typed confirmation, bad sizes, a non-disk, and that the disk is byte-for-byte unchanged afterwards.
 
@@ -119,6 +159,8 @@ console shell is an interactive bash: a `!!` in a command is history expansion, 
 
 ## Not done yet
 
-Swap, a no-TPM2 LUKS mode with FIDO2 (docs/encryption.md, the proposed per-variant initrd drop-in), FIDO2 enrollment of the
-encrypted volumes during the install, an unattended mode driven by a config file, a PCR policy for the TPM
-keys, LVM (an addon if ever needed), and any test on real hardware.
+Swap, FIDO2 enrollment of the encrypted *volumes* during the install (the empty-slot
+volumes accept a token at any time after first boot, `systemd-cryptenroll` with `run0`;
+only the account's key is offered at the first boot), an unattended mode driven by a
+config file, a PCR policy for the TPM keys, LVM (an addon if ever needed), and any test
+on real hardware.
