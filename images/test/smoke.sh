@@ -32,6 +32,7 @@ check "selinux mode is $expect_mode" 'getenforce' "$expect_mode"
 # Kernel noise a VM cannot avoid is filtered: TDX probing on non-TDX hosts.
 check "no journal errors" 'journalctl -b -p err --no-pager -q | grep -avE "virt/tdx|tpm tpm0: A TPM error \(256\)" | cut -c1-200 | head -5' ''
 check "no failed units" 'systemctl --failed --no-legend | wc -l' 0
+check "the serial-console addon is on the ESP (copied at install)" 'mkdir -p /run/esp && mount /dev/disk/by-partlabel/ESP /run/esp && grep -qa "console=tty0 console=ttyS0,115200n8" /run/esp/loader/addons/serial-console.addon.efi && umount /run/esp && echo present' present
 check "the wheel group exists" 'getent group wheel | cut -d: -f1' wheel
 check "root is locked and there is no regular account" 'passwd -S root | cut -d" " -f2; awk -F: "\$3>=1000 && \$3<60000" /etc/passwd /usr/lib/passwd | wc -l' $'L\n0'
 check "no console autologin on an installed system (the only login session is this ssh one)" 'loginctl list-sessions --no-legend | awk "\$6==\"user\"" | wc -l' 1

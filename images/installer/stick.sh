@@ -9,6 +9,11 @@
 #   /EFI/BOOT/BOOTX64.EFI                systemd-boot (the removable-media path)
 #   /EFI/Linux/inglenook.efi             the image's own UKI, as built
 #   /loader/addons/10-installer.addon.efi   installer cmdline + initrd overlay
+#   /loader/addons/serial-console.addon.efi  console= for the stick's own boot
+#                                           (and, copied to the installed ESP by
+#                                           the installer on request, for it:
+#                                           the only console channel a locked-
+#                                           down image has, docs/encryption.md)
 #
 # The image to install is on the stick too, unless NO_IMAGE=1 (fast stick for the
 # environment test): /inglenook/image.oci.tar.NNN is `skopeo copy` of the image as
@@ -50,6 +55,12 @@ trap 'podman rm -f "$c" >/dev/null' EXIT
 podman cp "$c:/usr/lib/systemd/boot/efi/systemd-bootx64.efi" "$WORK/tree/EFI/BOOT/BOOTX64.EFI"
 podman cp "$c:/boot/EFI/Linux/inglenook.efi" "$WORK/tree/EFI/Linux/inglenook.efi"
 "$HERE/build-addon.sh" "$WORK/tree/loader/addons/10-installer.addon.efi"
+# The serial-console addon (images/addons): a console= UKI addon. The image's
+# UKI carries none, and a locked-down (Secure Boot, type-2) UKI accepts no
+# other kernel arguments, so the console the installer shell and the tests
+# read on the serial comes from this file (and, on request, from the copy the
+# installer puts on the installed system's ESP).
+"$REPO/images/addons/serial-console.sh" "$WORK/tree/loader/addons/serial-console.addon.efi"
 
 if [[ -z ${NO_IMAGE:-} ]]; then
   id=$(podman image inspect --format '{{.Id}}' "$ref")

@@ -152,6 +152,9 @@ check "bootc knows the registry image" "bootc status --format=json | grep -o '\"
 # the ESP, and bootc finds the ESP by device scan at install and upgrade time.
 # So the file is checked on the ESP itself.
 check "fwupd's EFI is on the ESP (copied at install)" 'mkdir -p /run/esp && mount /dev/disk/by-partlabel/ESP /run/esp && cmp -s /usr/libexec/fwupd/efi/fwupdx64.efi /run/esp/EFI/BOOT/fwupdx64.efi && umount /run/esp && echo same' same
+# The installer's console question is auto-answered by INSTALL_YES=1, so the
+# stick's addon (with its console= cmdline) is on the installed ESP.
+check "the serial-console addon is on the installed ESP" 'mkdir -p /run/esp && mount /dev/disk/by-partlabel/ESP /run/esp && grep -qa "console=tty0 console=ttyS0,115200n8" /run/esp/loader/addons/serial-console.addon.efi && umount /run/esp && echo present' present
 # /var doubled as the image copy's scratch: the only partitions are ESP, root and var
 check "there is exactly one of each partition (ESP, root, var)" 'lsblk -rno PARTLABEL /dev/vda | grep -cE "ESP|root|var"' 3
 check "the first user was created" 'homectl list --no-legend | awk "{print \$1}"' alice

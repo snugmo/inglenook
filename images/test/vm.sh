@@ -121,6 +121,15 @@ cmd_install() {
   # ESP_FILES: a directory tree copied into the ESP after the install (for
   # example loader/credentials/*.cred).
   [[ -n ${ESP_FILES:-} ]] && cp -r "$ESP_FILES" share/esp
+  # The serial-console UKI addon (images/addons/serial-console.sh): the stub
+  # appends its .cmdline to the UKI's. A locked-down image (Secure Boot,
+  # type-2 UKI) accepts no SMBIOS kernel-cmdline-extra, so the serial console
+  # the tests read must come from the ESP; every install gets the addon. For
+  # the permissive images it only duplicates the SMBIOS console below (the
+  # same arguments; the last console= decides /dev/console).
+  [[ -f serial-console.addon.efi ]] || "$REPO/images/addons/serial-console.sh" serial-console.addon.efi
+  mkdir -p share/esp/loader/addons
+  cp serial-console.addon.efi share/esp/loader/addons/
   podman save --format oci-archive -o share/inglenook.oci "$ref"
   tpm_start
   truncate -s "${TARGET_SIZE:-20G}" target.img
@@ -191,7 +200,9 @@ cmd_start() {
   # Extra kernel command line through systemd-stub's SMBIOS string (Secure Boot is off in the VM).
   # The first-boot disk encryption wizard (systemd-cryptenroll --firstboot) waits for input, so
   # the tests skip it unless VM_FIRSTBOOT=1.
-  # The image has no console= (see the Containerfile); the tests read the serial one.
+  # The image has no console= (see the Containerfile); the tests read the serial
+  # one - from the UKI addon on the ESP (installed above) and from here: a
+  # locked-down image ignores the SMBIOS string, so the addon is its only route.
   # (qemu option values double their commas.)
   local cmdline_extra="console=tty0 console=ttyS0,115200n8 ${VM_CMDLINE:-}"
   [[ -z ${VM_FIRSTBOOT:-} ]] && cmdline_extra="systemd.firstboot=no $cmdline_extra"

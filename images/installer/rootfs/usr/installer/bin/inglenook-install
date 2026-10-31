@@ -21,7 +21,9 @@
 # Questions are skipped when their answer is in the environment (the tests do
 # that): INSTALL_DISK, INSTALL_ROOT_SIZE (50G), INSTALL_ENCRYPT (tpm2|none on
 # the tpm2 variant, luks|none on the no-tpm variant),
-# INSTALL_RECOVERY_KEY (1|0), INSTALL_TOKEN (1|0: enrol a FIDO2 key for the first user at the first boot), INSTALL_USER / INSTALL_REALNAME / INSTALL_USER_PASSWORD
+# INSTALL_RECOVERY_KEY (1|0), INSTALL_CONSOLE (1|0: a serial console on the
+# installed system: the stick's UKI addon, copied to the system's ESP),
+# INSTALL_TOKEN (1|0: enrol a FIDO2 key for the first user at the first boot), INSTALL_USER / INSTALL_REALNAME / INSTALL_USER_PASSWORD
 # (the first user; INSTALL_NO_USER=1 skips it), INSTALL_YES=1 (assume yes everywhere,
 # including the wipe), INSTALL_NO_REBOOT=1, INSTALL_TARGET_IMGREF, INSTALL_IMAGE_DIR.
 set -Eeuo pipefail
@@ -244,6 +246,30 @@ if [ -z "${INSTALL_NO_USER:-}" ]; then
   fi
 fi
 
+# --- 5c. The serial console ------------------------------------------------------------------------
+# The image's UKI carries no console= argument: on a machine without a UART it
+# would start a serial getty that fails and restarts every 10 seconds, so it
+# cannot be baked in. A locked-down (Secure Boot, type-2) UKI accepts no other
+# kernel arguments either, so the only way to give the system a serial console
+# is a UKI addon on its ESP: the stub appends the addon's cmdline to the
+# UKI's. The stick carries one (console=tty0 console=ttyS0,115200n8); on
+# request it is copied to the installed ESP. console= only selects which
+# consoles are shown and grants no privilege, which is why it is the only
+# argument the addon carries.
+CONSOLE_ADDON=
+if [ -f "$SRC/loader/addons/serial-console.addon.efi" ]; then
+  CONSOLE_ADDON=$SRC/loader/addons/serial-console.addon.efi
+  if [ -z "${INSTALL_CONSOLE:-}" ]; then
+    yes_no "Give the installed system a serial console (a UKI addon on its ESP; useful for headless machines)?" n && INSTALL_CONSOLE=1 || INSTALL_CONSOLE=0
+  fi
+  if [ "${INSTALL_CONSOLE:-0}" = 1 ] && [ -z "${INSTALL_YES:-}" ]; then
+    echo "    The addon adds 'console=tty0 console=ttyS0,115200n8' to the kernel command line; remove loader/addons/serial-console.addon.efi from the ESP to turn it off."
+  fi
+else
+  [ -z "${INSTALL_CONSOLE:-}" ] || warn "INSTALL_CONSOLE is set, but this stick has no serial-console addon (an older stick?): the installed system will have no serial console."
+  INSTALL_CONSOLE=0
+fi
+
 # --- 6. Wipe and partition ------------------------------------------------------------------------
 say "Erasing $DISK"
 for p in $(lsblk -rpno PATH,TYPE "$DISK" | awk '$2 == "part" { print $1 }'); do wipefs -a -q "$p" || true; done
@@ -324,6 +350,9 @@ cat "$IMG"/image.oci.tar.* | tar -x -C /scratch/oci
 mkdir -p /etc/ostree
 if [ -f "$IMG/prepare-root.conf" ]; then cp "$IMG/prepare-root.conf" /etc/ostree/prepare-root.conf
 else printf '[composefs]\nenabled = yes\n[sysroot]\nreadonly = true\n' > /etc/ostree/prepare-root.conf; fi
+# The serial-console addon (step 5c) is staged from the stick now, because the
+# stick is let go before the installed ESP is written.
+[ "${INSTALL_CONSOLE:-0}" = 1 ] && [ -n "$CONSOLE_ADDON" ] && cp "$CONSOLE_ADDON" "$RUN/serial-console.addon.efi"
 for m in "$RUN"/src*; do mountpoint -q "$m" 2>/dev/null && umount "$m"; done
 say "The USB stick is no longer needed: you can unplug it now."
 
@@ -337,6 +366,15 @@ deploys=(/target/state/deploy/*/)
 DEPLOY=${deploys[0]%/}
 # bootc finalized the target (fstrim, then mounted it read-only)
 mount -o remount,rw /target
+
+# The serial console (step 5c): the addon on the installed ESP. It is written
+# after bootc, so the boot files bootc just laid down are there first, and the
+# addon is an addition the stub picks up, not a rewrite of the UKI.
+if [ "${INSTALL_CONSOLE:-0}" = 1 ]; then
+  mkdir -p /target/boot/loader/addons
+  cp "$RUN/serial-console.addon.efi" /target/boot/loader/addons/
+  echo "    serial console: on the installed ESP (loader/addons/serial-console.addon.efi)"
+fi
 
 # The machine id of the new system: the same one that seeded the partition
 # UUIDs (step 6). It goes into the deployment's /etc (what the first boot's
@@ -408,6 +446,10 @@ if [ -n "$FIRST_USER" ]; then
   echo "  Log in as '$FIRST_USER' after the first boot; use run0 for administrative tasks."
 else
   echo "  The first boot asks for the first user on the console; without one nobody can log in."
+fi
+if [ "${INSTALL_CONSOLE:-0}" = 1 ]; then
+  echo "  The system has a serial console (the ESP's loader/addons/serial-console.addon.efi);"
+  echo "  delete that file to turn it off again."
 fi
 if [ "$var_encrypt" = tpm2 ]; then
   echo "  To add a recovery key or a FIDO2 token for the /var volume later, use"
