@@ -90,14 +90,24 @@ args+=(--build-context "initrd=$WORK/out")
 initrd="$WORK/out/initrd.cpio.zst"
 [[ -f $initrd ]] || { echo "error: mkosi did not produce $initrd" >&2; exit 1; }
 tmp=$(mktemp -d)
-trap 'podman rm -f "$c" >/dev/null; rm -rf "$tmp"' EXIT
-zstdcat "$initrd" | cpio -idm --quiet --directory "$tmp" 2>/dev/null
-mods=$(ls -d "$tmp"/usr/lib/modules/* 2>/dev/null | xargs -r -n1 basename | sort -u | tr '\n' ' ')
+trap 'podman rm -f "$c" >/dev/null; chmod -R u+w "$tmp" 2>/dev/null; rm -rf "$tmp"' EXIT
+# Extract only what the checks need (the mkosi cpio mirrors the ostree image:
+# /usr is read-only, so a full extract cannot be cleaned up unprivileged).
+zstdcat "$initrd" | cpio -it --quiet 2>/dev/null \
+  | grep -oE '^usr/lib/modules/[^/]+/' | sed -E 's#^usr/lib/modules/##; s#/$##' | sort -u > "$tmp/mods"
+mods=$(tr '\n' ' ' < "$tmp/mods")
 [[ $mods == "$kver " ]] || { echo "error: the initrd has the kernel trees: $mods (the image: $kver)" >&2; exit 1; }
-image_systemd=$(podman run --rm "$PRE" rpm -q systemd)
-initrd_systemd=$(rpm -q --root "$tmp" systemd 2>/dev/null || true)
+# The mkosi cpio has no rpm db (mkosi strips it), so the systemd version is
+# read from the build note rpm embeds in the binary itself ({"type":"rpm",
+# "name":"systemd","version":"262-3.fc45",...}).
+zstdcat "$initrd" | cpio -idm --quiet --directory "$tmp" 'usr/lib/systemd/systemd' 'usr/lib/os-release' 2>/dev/null
+image_systemd=$(podman run --rm "$PRE" rpm -q systemd | sed -E 's/^systemd-//; s/\.x86_64$//')
+initrd_systemd=$(strings -n 3 "$tmp/usr/lib/systemd/systemd" 2>/dev/null \
+  | grep -oE '"name":"systemd","version":"[^"]+"' | head -1 \
+  | sed -E 's/.*"version":"([^"]+)"/\1/')
+[[ -n $initrd_systemd ]] || { echo "error: no systemd version note in the initrd binary" >&2; exit 1; }
 [[ $initrd_systemd == $image_systemd ]] || { echo "error: initrd systemd '$initrd_systemd' != image '$image_systemd' (stale mkosi release?)" >&2; exit 1; }
-initrd_ver=$(sed -n 's/^VERSION_ID=//p' "$tmp/etc/os-release" 2>/dev/null)
+initrd_ver=$(sed -n 's/^VERSION_ID=//p' "$tmp/usr/lib/os-release" 2>/dev/null)
 image_ver=$(podman run --rm "$PRE" sed -n 's/^VERSION_ID=//p' /etc/os-release)
 [[ -z $initrd_ver || $initrd_ver == $image_ver ]] || { echo "error: initrd Fedora $initrd_ver != image Fedora $image_ver" >&2; exit 1; }
 echo "initrd matches the image: Fedora ${initrd_ver:-?}, systemd $initrd_systemd, kernel $kver"
