@@ -187,17 +187,22 @@ RUN dnf -y install --allowerasing \
       cups \
  && dnf clean all
 
-# RPM Fusion (free and nonfree), for ffmpeg and the freeworld drivers. The release
+# RPM Fusion (free and nonfree), for ffmpeg and the freeworld codecs. The release
 # packages are pinned by SHA-256 (they carry the repo definitions and the signing
 # keys; every package after that is checked against those keys). F45 is not
 # released yet, so they come from the development tree; at the release the files
 # move to .../fedora/releases/45/Everything/x86_64/os/Packages/r/ and the pins
 # need updating. The two gstreamer packages add the codecs the free plugins lack. ffmpeg replaces ffmpeg-free and its libraries, and libavcodec-freeworld
-# adds the patent-encumbered codecs to them. The freeworld Mesa drivers add H.264/H.265
-# hardware decoding (VA-API) and the Vulkan video decode that the stock Mesa builds lack; they
-# replace the stock mesa-va-drivers and mesa-vulkan-drivers, hence --allowerasing.
-# The arch is spelled out: with the stock x86_64 package installed, dnf otherwise
-# picks the i686 build of the freeworld package, which conflicts with nothing.
+# adds the patent-encumbered codecs to them. The freeworld Mesa drivers (H.264/H.265
+# hardware decoding (VA-API) and the Vulkan video decode that the stock Mesa builds
+# lack, replacing the stock mesa-va-drivers and mesa-vulkan-drivers, hence
+# --allowerasing and the spelled-out .x86_64 arch) are not installable for now:
+# the F45 builds require mesa-filesystem = 26.2.6, which the pre-release F45
+# repos do not have yet (26.2.3) - re-add them (with --allowerasing, as they
+# replace the stock mesa-va-drivers and mesa-vulkan-drivers) when Fedora's
+# mesa reaches 26.2.6, i.e. at the release. --allowerasing stays on the
+# ffmpeg install either way: rpmfusion's ffmpeg-libs provides libswscale-free
+# and conflicts with the Fedora libswscale-free the base image installed.
 ADD --checksum=sha256:a120c2a2c70ec2c8ad461908aacf316998b03f6b2156c143b772052972e80a95 \
     https://download1.rpmfusion.org/free/fedora/development/45/Everything/x86_64/os/Packages/r/rpmfusion-free-release-45-0.2.noarch.rpm \
     /tmp/rpmfusion-free-release.rpm
@@ -208,7 +213,6 @@ RUN dnf -y install --nogpgcheck /tmp/rpmfusion-free-release.rpm /tmp/rpmfusion-n
  && rm /tmp/rpmfusion-*-release.rpm \
  && dnf -y install --allowerasing \
       ffmpeg libavcodec-freeworld gstreamer1-plugins-bad-freeworld gstreamer1-plugins-ugly \
-      mesa-va-drivers-freeworld.x86_64 mesa-vulkan-drivers-freeworld.x86_64 \
  && dnf clean all
 
 # More desktop and system packages. Already listed above (or in the base): audit,
