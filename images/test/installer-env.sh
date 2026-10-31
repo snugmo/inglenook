@@ -32,6 +32,7 @@ T=$'\t'
 the banner reached the console, whole${T}@console${T}inglenook-install
 the shell is root${T}id -un${T}^root\$
 the addon cmdline is appended${T}cat /proc/cmdline${T}rd.systemd.unit=inglenook-installer.target
+the console addon cmdline is appended${T}cat /proc/cmdline${T}console=ttyS0,115200n8
 the UKI cmdline is still there${T}cat /proc/cmdline${T}composefs=
 we are in the initrd, not the real root${T}findmnt -no FSTYPE /${T}(rootfs|tmpfs|ramfs)
 switch-root never ran${T}systemctl is-active initrd-switch-root.service${T}inactive
