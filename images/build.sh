@@ -81,6 +81,27 @@ mkosi --directory images/initrd --force --build-sources= --release "$FEDORA_VERS
   "${extra_trees[@]}"
 args+=(--build-context "initrd=$WORK/out")
 
+# The initrd must track the image, not the mkosi release cache: a stale pull
+# once gave an initrd from the previous Fedora (its systemd 259 against the
+# image's 262), which broke the unlock paths in ways a boot log did not
+# explain. The kernel modules come from the image (above); verify the rest -
+# the release, the systemd version and the kernel tree - against the pre
+# stage, which carries the same base layer as the final image.
+initrd="$WORK/out/initrd.cpio.zst"
+[[ -f $initrd ]] || { echo "error: mkosi did not produce $initrd" >&2; exit 1; }
+tmp=$(mktemp -d)
+trap 'podman rm -f "$c" >/dev/null; rm -rf "$tmp"' EXIT
+zstdcat "$initrd" | cpio -idm --quiet --directory "$tmp" 2>/dev/null
+mods=$(ls -d "$tmp"/usr/lib/modules/* 2>/dev/null | xargs -r -n1 basename | sort -u | tr '\n' ' ')
+[[ $mods == "$kver " ]] || { echo "error: the initrd has the kernel trees: $mods (the image: $kver)" >&2; exit 1; }
+image_systemd=$(podman run --rm "$PRE" rpm -q systemd)
+initrd_systemd=$(rpm -q --root "$tmp" systemd 2>/dev/null || true)
+[[ $initrd_systemd == $image_systemd ]] || { echo "error: initrd systemd '$initrd_systemd' != image '$image_systemd' (stale mkosi release?)" >&2; exit 1; }
+initrd_ver=$(sed -n 's/^VERSION_ID=//p' "$tmp/etc/os-release" 2>/dev/null)
+image_ver=$(podman run --rm "$PRE" sed -n 's/^VERSION_ID=//p' /etc/os-release)
+[[ -z $initrd_ver || $initrd_ver == $image_ver ]] || { echo "error: initrd Fedora $initrd_ver != image Fedora $image_ver" >&2; exit 1; }
+echo "initrd matches the image: Fedora ${initrd_ver:-?}, systemd $initrd_systemd, kernel $kver"
+
 build --target base -t "$BASE"
 
 # Needs the image's own bootc plus access to the container storage.
