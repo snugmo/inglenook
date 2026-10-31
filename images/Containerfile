@@ -341,7 +341,13 @@ RUN find /usr -xdev -type f -perm -4000 -exec chmod u-s {} + \
 # The base image's bootc-generic-growpart.service grows the root partition to the end of the
 # disk, but only in a VM and only for a plain partition (not LUKS). The installer chooses the
 # layout (a fixed root, the rest for /var), so a VM must not behave differently from hardware.
-RUN systemctl mask bootc-generic-growpart.service
+# Same story for the systemd 262 auto-growfs: repart marks every filesystem partition it
+# creates with the GPT "grow file system" attribute, and the gpt-auto generator then starts
+# a growfs unit for it at every boot. Here that is a no-op (the filesystems already fill
+# their partitions) and wrong: / is a composefs image file, not a block device (the root
+# unit fails, on a plain root, at every boot), and the LUKS volume behind /var rejects
+# crypt_resize with EPERM (journal spam). Sizes are final at install time, so mask both.
+RUN systemctl mask bootc-generic-growpart.service systemd-growfs-root.service systemd-growfs@.service
 
 # mcelog only supports Intel processors (on AMD it fails: "CPU is unsupported"), but Fedora's
 # preset enables the service, so on an AMD machine it is a failed unit on every boot. Disable
