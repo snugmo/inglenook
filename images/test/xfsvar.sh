@@ -48,7 +48,8 @@ checks() {
   "$vm" new-avc || fail=1
   check "no failed units" 'systemctl --failed --no-legend | wc -l' 0
   check "no journal errors" 'journalctl -b -p err --no-pager -q | grep -avE "virt/tdx|tpm tpm0: A TPM error \(256\)" | cut -c1-200 | head -5' ''
-  check "the serial-console addon is on the ESP (copied at install)" 'mkdir -p /run/esp && mount /dev/disk/by-partlabel/ESP /run/esp && grep -qa "console=tty0 console=ttyS0,115200n8" /run/esp/loader/addons/serial-console.addon.efi && umount /run/esp && echo present' present
+  # bootc's to-disk names the ESP partition "EFI-SYSTEM" (the stick's repart calls it "ESP")
+  check "the serial-console addon is on the ESP (copied at install)" 'mkdir -p /run/esp && mount /dev/disk/by-partlabel/EFI-SYSTEM /run/esp && grep -qa "console=tty0 console=ttyS0,115200n8" /run/esp/loader/addons/serial-console.addon.efi && umount /run/esp && echo present' present
 }
 
 echo "boot 1: the initrd safety net creates and formats the partition"
@@ -88,5 +89,5 @@ check "selinux mode is $expect_mode" 'getenforce' "$expect_mode"
 "$vm" new-avc || fail=1
 check "no failed units" 'systemctl --failed --no-legend | wc -l' 0
 check "no journal errors" 'journalctl -b -p err --no-pager -q | grep -avE "virt/tdx|tpm tpm0: A TPM error \(256\)" | cut -c1-200 | head -5' ''
-check "the serial-console addon is on the ESP (copied at install)" 'mkdir -p /run/esp && mount /dev/disk/by-partlabel/ESP /run/esp && grep -qa "console=tty0 console=ttyS0,115200n8" /run/esp/loader/addons/serial-console.addon.efi && umount /run/esp && echo present' present
+check "the serial-console addon is on the ESP (copied at install)" 'mkdir -p /run/esp && mount /dev/disk/by-partlabel/EFI-SYSTEM /run/esp && grep -qa "console=tty0 console=ttyS0,115200n8" /run/esp/loader/addons/serial-console.addon.efi && umount /run/esp && echo present' present
 exit $fail
