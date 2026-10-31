@@ -15,6 +15,9 @@ onto any FAT32 drive (`build/installer/tree`).
 /EFI/BOOT/BOOTX64.EFI                   systemd-boot (the removable-media path)
 /EFI/Linux/inglenook.efi                the image's own UKI, unmodified
 /loader/addons/10-installer.addon.efi   the installer (below)
+/loader/addons/serial-console.addon.efi console= for the stick's own boot (below);
+                                        the installer copies it to the installed
+                                        system's ESP on request
 /inglenook/image.oci.tar.000, .001 ...  the image: `skopeo copy` oci-archive, split in 1 GiB parts (FAT32)
 /inglenook/SHA256SUMS                   checked before anything is touched
 /inglenook/target-imgref                where updates come from (a registry, not this stick)
@@ -41,6 +44,19 @@ variant** (`tpm2` or `no-tpm`) the stick was built from. It comes from the image
 build arg; `stick.sh` reads the label and refuses an explicit override that contradicts
 it, since the marker must match the variant drop-in that is already in the image's
 initrd — a mismatch would install a system that cannot boot).
+
+The **serial-console addon** (`images/addons/serial-console.sh`, a `ukify build` on
+`addonx64.efi.stub`) carries `console=tty0 console=ttyS0,115200n8`. The image's UKI
+deliberately has no `console=` argument (`console=ttyS0` on a machine without a UART
+starts a serial getty that fails and restarts every 10 seconds), and a locked-down
+(Secure Boot, type-2) UKI accepts no other kernel arguments — so a serial console, on
+the stick or on an installed system, comes from this file on the ESP: the stub
+appends the addon's cmdline to the UKI's. `console=` only selects which consoles are
+shown and grants no privilege, which is what makes it safe in that role (a locked-down
+system needs the addon signed like the UKI; here it is unsigned, with Secure Boot off).
+The addon's own boot is what the installer's root shell and the tests read on the
+serial; without it (real firmware adds no console of its own) the installer would have
+no console at all.
 
 ## The two image variants
 
@@ -71,7 +87,10 @@ Boot the stick (the console shows a banner), then run `inglenook-install`. It:
    TPM-sealed root;
 5. asks for the **first user** (below), because root is locked and there is no other account, so
    without one nobody could log in;
-6. does the whole job, all in the initrd: wipes the disk, partitions it with
+6. asks whether the installed system gets a **serial console** (default no): the stick's
+   serial-console addon (above), copied to the system's ESP after the install; deleting
+   the file from the ESP turns it off again;
+7. does the whole job, all in the initrd: wipes the disk, partitions it with
    `systemd-repart` from `/usr/installer/repart.d/` (`00-esp.conf`, `10-root.conf`,
    `60-var.conf`: the committed definitions carry the shape of each partition; the
    installer appends the chosen root size and `Encrypt=` to its copies), with
@@ -94,8 +113,9 @@ Boot the stick (the console shows a banner), then run `inglenook-install`. It:
 
 Questions whose answer is in the environment are not asked (`INSTALL_DISK`,
 `INSTALL_ROOT_SIZE`, `INSTALL_ENCRYPT=tpm2|none` on the tpm2 variant, `luks|none` on the
-no-tpm one, `INSTALL_RECOVERY_KEY`, `INSTALL_USER`, `INSTALL_REALNAME`,
-`INSTALL_USER_PASSWORD`, `INSTALL_NO_USER=1`, `INSTALL_YES=1`, `INSTALL_NO_REBOOT=1`,
+no-tpm one, `INSTALL_RECOVERY_KEY`, `INSTALL_CONSOLE=1|0`, `INSTALL_USER`,
+`INSTALL_REALNAME`, `INSTALL_USER_PASSWORD`, `INSTALL_NO_USER=1`, `INSTALL_YES=1`
+(answers yes to every yes/no question, including the console one), `INSTALL_NO_REBOOT=1`,
 `INSTALL_TARGET_IMGREF`, `INSTALL_IMAGE_DIR`); the tests use that.
 
 Measured in QEMU: about 45 s for the install itself; the image copy lives on the target
@@ -134,8 +154,10 @@ systemd-homed account:
 - `images/test/install-from-stick.sh`: the whole install onto a disk that holds old data, a first
   user, the stick pulled over QMP as soon as it is no longer needed, then the disk booted
   alone: the root and /var volumes are in the state the chosen `ENCRYPT=tpm2|luks|none`
-  promises (TPM2 token, empty slot, or plain), /var is XFS, the account exists, is in
-  `wheel`, takes the password and not a wrong one, and the credential is gone. `luks`
+  promises (TPM2 token, empty slot, or plain), /var is XFS, the serial-console addon
+  is on the ESP (the console question is auto-answered by `INSTALL_YES=1`), the
+  account exists, is in `wheel`, takes the password and not a wrong one, and the
+  credential is gone. `luks`
   needs a stick made from the no-tpm image variant (the tpm2 installer refuses it), and
   that run also exercises the variant's FIDO2/empty-slot root unlock drop-in
   (docs/encryption.md), since the installed disk boots without a TPM.

@@ -63,7 +63,19 @@ FIDO2 libraries, HID modules), not in the installer addon.
   systemd-boot appends it to the UKI's static command line — the same path
   `vm.sh` uses to get `console=ttyS0` into the test VMs. But that is a
   permissive-chain story: a locked-down type-2 UKI entry has no such carrier at
-  all (see the last section).
+  all (see the last section). The one exception is a **UKI addon**
+  (`addonx64.efi.stub`, `ukify build --stub …`): the stub concatenates the
+  addon's `.cmdline` to the UKI's own, and a signed addon passes Secure Boot
+  like the UKI does. The addon's content is static (a file on the ESP), so it
+  is still not a *per-machine* carrier — but it is the only kernel-argument
+  channel a type-2 entry has, and it is what carries `console=` (the image's
+  UKI has none: `console=ttyS0` on a machine without a UART starts a serial
+  getty that fails and restarts every 10 seconds). The stick carries
+  `loader/addons/serial-console.addon.efi` for its own boot, the installer
+  copies it to the installed system's ESP on request, and the tests put it on
+  every test ESP (docs/installer.md). `console=` only selects which consoles
+  are shown and grants no privilege, which is what makes it safe to append to
+  a locked-down command line.
 - The initrd has no `/etc/crypttab`, so crypttab is not a carrier either (it is
   static, built into the image; the UUID is per-machine).
 
@@ -238,9 +250,10 @@ Remaining open items:
   conversion suggests libcryptsetup can signal "not unique" and bail to the
   next method instead of trying the second token. One key is the designed
   path; verify the plugin's iteration semantics before promising multiple.
-- A type-2 entry also loses the QEMU `kernel-cmdline-extra` console channel
-  (type-1 only), so locked-down *test* images need `console=` baked into the
-  UKI (a test-only build flag) or the tests keep the permissive type-1 layout.
+- *Resolved* — the console on a type-2 entry: the `kernel-cmdline-extra`
+  channel is type-1 only, but the serial console is a UKI addon on the ESP
+  (see "Levers that do not work"), so a locked-down system gets `console=`
+  without baking it into the UKI and without any test-only build flag.
 
 After first boot the first user enrolls a token on the booted system
 (`run0 systemd-cryptenroll --fido2-device=auto /dev/mapper/root`) and wipes
