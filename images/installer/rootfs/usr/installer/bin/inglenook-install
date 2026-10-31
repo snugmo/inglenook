@@ -364,8 +364,12 @@ bootc install to-filesystem --composefs-backend --bootloader systemd --generic-i
 deploys=(/target/state/deploy/*/)
 [ ${#deploys[@]} = 1 ] && [ -d "${deploys[0]}etc" ] || die "Cannot find the deployment's /etc under /target/state/deploy."
 DEPLOY=${deploys[0]%/}
-# bootc finalized the target (fstrim, then mounted it read-only)
+# bootc finalized the target (fstrim, then mounted it read-only) - the ESP
+# included, a separate mount under /target/boot (it is the boot partition).
+# One remount per mount: mount with several filesystems applies a remount to
+# only the last one.
 mount -o remount,rw /target
+mount -o remount,rw /target/boot
 
 # The serial console (step 5c): the addon on the installed ESP. It is written
 # after bootc, so the boot files bootc just laid down are there first, and the
@@ -383,6 +387,7 @@ fi
 # first boot anymore: no machine id commit, no disk-encryption wizard - the
 # volumes already exist and their keys were decided here.
 say "Writing the machine id $MACHINE_ID"
+[ -z "${INSTALL_DEBUG:-}" ] || { mount; findmnt -n -o TARGET,FSTYPE,OPTIONS /target /target/boot "$DEPLOY" 2>/dev/null || true; }
 for f in "$DEPLOY/etc/machine-id" /target/etc/machine-id; do
   [ -d "$(dirname "$f")" ] || continue
   [ -e "$f" ] || : > "$f"
@@ -434,7 +439,8 @@ umount /var/tmp
 rm -rf /scratch/oci /scratch/tmp
 umount /scratch
 case "$var_encrypt" in tpm2|key-file) cryptsetup close var ;; esac
-umount /target/boot /target
+umount /target/boot
+umount /target
 [ -n "$root_encrypt" ] && cryptsetup close root
 sync
 say "Installation complete."
