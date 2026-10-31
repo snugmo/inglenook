@@ -33,6 +33,7 @@ ENCRYPT=${ENCRYPT:-tpm2}
 [[ $ENCRYPT == tpm2 || $ENCRYPT == luks || $ENCRYPT == none ]] || { echo "ENCRYPT must be tpm2, luks or none (got '$ENCRYPT')" >&2; exit 1; }
 RAM=${RAM:-4G}
 KEY=${KEY:-$REPO/build/xfsvar/key}
+[[ -f $KEY ]] || { mkdir -p "$(dirname "$KEY")"; ssh-keygen -q -t ed25519 -N '' -C inglenook-test -f "$KEY"; }
 ref=${1:-$(podman images --sort created --format '{{.Repository}}:{{.Tag}}' ghcr.io/snugmo/inglenook | awk 'NR==1')}
 mkdir -p "$WORK"
 cd "$WORK"
@@ -90,7 +91,7 @@ bad() { echo "FAIL $1"; fail=1; }
 
 echo "installer VM: waiting for the shell"
 run 240 'echo 1 > /proc/sys/kernel/printk; for i in $(seq 60); do blkid -L INGLENOOK && break; sleep 1; done' >/dev/null
-run 20 "(INSTALL_DISK=/dev/vda INSTALL_ROOT_SIZE=${ROOT_SIZE:-8G} INSTALL_ENCRYPT=$ENCRYPT INSTALL_RECOVERY_KEY=0 INSTALL_USER=alice INSTALL_TOKEN=1 INSTALL_REALNAME='Alice Example' INSTALL_USER_PASSWORD='correct horse battery' INSTALL_YES=1 INSTALL_NO_REBOOT=1 setsid inglenook-install > /tmp/install.log 2>&1 &)" >/dev/null
+run 20 "(INSTALL_DISK=/dev/vda INSTALL_ROOT_SIZE=${ROOT_SIZE:-8G} INSTALL_ENCRYPT=$ENCRYPT INSTALL_RECOVERY_KEY=0 INSTALL_USER=alice INSTALL_TOKEN=1 INSTALL_REALNAME='Alice Example' INSTALL_USER_PASSWORD='correct horse battery' INSTALL_YES=1 INSTALL_NO_REBOOT=1${INSTALL_DEBUG:+ INSTALL_DEBUG=1} setsid inglenook-install > /tmp/install.log 2>&1 &)" >/dev/null
 run 900 'until grep -q "no longer needed" /tmp/install.log; do sleep 1; if grep -q "^ERROR:" /tmp/install.log; then break; fi; done; grep -c "no longer needed" /tmp/install.log' | tail -1 | grep -q '^1' \
   && ok "the image was extracted from the stick" || bad "the install never got past the image extraction"
 
