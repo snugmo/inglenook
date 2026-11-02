@@ -37,7 +37,18 @@ INITRD=${INITRD:-$REPO/build/initrd/out/initrd.cpio.zst}
 mkdir -p "$tmp/initrd"
 # Regular files and symlinks are enough to compare against (no device nodes).
 (cd "$tmp/initrd" && zstd -dc "$INITRD" | cpio -id --quiet --no-absolute-filenames 'usr/*' 2>/dev/null) || true
-mkosi --directory "$HERE" --force --output-directory "$tmp/mkosi" >"$tmp/mkosi.log" 2>&1 \
+# Pin bootc to the version the boot initrd carries. The initrd's copy comes
+# from the pre image (images/build.sh), while the fresh dnf resolve in this
+# mkosi picks the newest from the repos, so without the pin overlay.py would
+# reject the addon: the overlay unpacks over the initrd, and a file present
+# in both must be identical. The mkosi cpio has no rpm db (mkosi strips it),
+# so the version is read from the build note rpm embeds in the binary.
+bootc_ver=$(strings -n 3 "$tmp/initrd/usr/lib/bootc/initramfs-setup" 2>/dev/null \
+  | grep -oE '"name":"bootc","version":"[^"]+"' | head -1 \
+  | sed -E 's/.*"version":"([^"]+)"/\1/')
+[[ -n $bootc_ver ]] || { echo "error: no bootc version note in the initrd's initramfs-setup" >&2; exit 1; }
+echo "pinning the overlay's bootc to the initrd's $bootc_ver"
+mkosi --directory "$HERE" --force --package "bootc-$bootc_ver" --output-directory "$tmp/mkosi" >"$tmp/mkosi.log" 2>&1 \
   || { cat "$tmp/mkosi.log" >&2; exit 1; }
 # Files of the packages in exclude-packages.txt (dependencies the installer never runs).
 grep -vE '^(#|$)' "$HERE/exclude-packages.txt" | while read -r pkg; do
