@@ -283,6 +283,17 @@ RUN dnf -y install --setopt=tsflags=noscripts netbird netbird-ui \
  && chmod 0600 /etc/sysconfig/netbird \
  && dnf clean all
 
+# LibreWolf (a hardened Firefox fork) from the vendor's yum repository, the same
+# setup as NetBird above: the repo file is in rootfs/ (the factory /etc below
+# carries it, so a wiped /etc keeps the repo), the signing key is pinned by
+# SHA-256 (fingerprint 662E 3CDD 6FE3 2900 2D0C A5BB 4033 9DD8 2B12 EF16,
+# "LibreWolf Maintainers"), and every package is checked against it.
+COPY rootfs/etc/yum.repos.d/librewolf.repo /etc/yum.repos.d/librewolf.repo
+ADD --checksum=sha256:cd1c45ebf33b42191af369b5ea901508eb7dff3dd5086abcb601b25121bc70ad \
+    https://repo.librewolf.net/pubkey.gpg /etc/pki/rpm-gpg/RPM-GPG-KEY-librewolf
+RUN dnf -y install librewolf \
+ && dnf clean all
+
 # Container and cluster clients from Fedora: kubectl (versioned package, the cluster
 # version it matches is 1.37), the docker CLI with buildx and compose (talking to
 # podman's docker-compatible socket; there is no docker daemon in the image),
