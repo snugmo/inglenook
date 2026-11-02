@@ -50,6 +50,8 @@ LABEL org.opencontainers.image.title="inglenook" \
 # tmpfiles.d (rpm-ostree-0-integration.conf) wants /usr/local/sbin, which the
 # base lacks, and root.conf's `z / 555` tries to fchmod the composefs root,
 # whose mode a container build cannot change (it stays 0755), so drop the rule.
+# (The dnf layers below may update systemd, which re-extracts these files: the
+# "base fixups, again" step near the end of this stage re-applies this.)
 RUN mkdir -p /usr/local/sbin \
  && sed -i '/^z \/ 555 /d' /usr/lib/tmpfiles.d/root.conf
 
@@ -322,6 +324,21 @@ RUN dnf -y install --nogpgcheck /tmp/cosign.rpm /tmp/nono.rpm \
  && tar -xzf /tmp/oras.tar.gz -C /usr/bin oras \
  && rm /tmp/cosign.rpm /tmp/nono.rpm /tmp/oras.tar.gz \
  && dnf clean all
+
+# Base fixups, again: any dnf layer in this stage can update systemd, which
+# re-extracts /usr/lib/tmpfiles.d/* and undoes the first sed above (the F45
+# release did exactly that: 262-3 to 262.1). The 262.1 tree also has lines
+# that cannot work in this image, where /home, /srv and /root are symlinks
+# into /var (a directory rule on a symlink is an error on every boot):
+# home.conf's Q /home and q /srv, and provision.conf's /root lines. They
+# target the real directories under /var instead; for provision.conf that is
+# the 262-3 behaviour, and ssh.authorized_keys.root still lands in
+# /root/.ssh/authorized_keys through the symlink. Re-running the same edits
+# on an unchanged tree is a no-op, so this is idempotent; if a dnf layer is
+# added later in this stage, this step must move after it.
+RUN sed -i '/^z \/ 555 /d' /usr/lib/tmpfiles.d/root.conf \
+ && sed -i 's|^Q /home |Q /var/home |; s|^q /srv |q /var/srv |' /usr/lib/tmpfiles.d/home.conf \
+ && sed -i 's|^d- /root |d- /var/roothome |; s|^d- /root/|d- /var/roothome/|; s|^f^ /root/|f^ /var/roothome/|' /usr/lib/tmpfiles.d/provision.conf
 
 # Packages the base ships that this image does not use. dracut is not used (the
 # initrd is built by mkosi), but bootc, ostree and rpm-ostree require the dracut
