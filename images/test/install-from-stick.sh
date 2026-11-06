@@ -153,7 +153,8 @@ esac
 if [[ $FIDO2 == 1 ]]; then
   # The installer VM has no FIDO2 device: the enrolment waited (a short poll
   # under INSTALL_YES=1), warned, and continued without touching the volumes.
-  check "the installer warned and continued without a FIDO2 key" 'grep -c "No FIDO2 key present" phases.txt' 1
+  # (phases.txt is local, not on the installed disk: a plain grep, not check.)
+  [[ $(grep -c "No FIDO2 key present" phases.txt) == 1 ]] && ok "the installer warned and continued without a FIDO2 key" || bad "no 'No FIDO2 key present' warning in the installer log"
   case "$ENCRYPT" in
     tpm2|luks)
       check "no FIDO2 token in the root (no key was enrolled)" 'cryptsetup luksDump /dev/disk/by-partlabel/root 2>/dev/null | grep -c systemd-fido2' 0 ;;
