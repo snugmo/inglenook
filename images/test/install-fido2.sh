@@ -88,8 +88,10 @@ for v in $VOLS; do
   g "timeout 120 systemd-cryptenroll --fido2-device=auto --unlock-headless /dev/disk/by-partlabel/$v"
 done
 for v in $VOLS; do
-  check "the $v volume got a systemd-fido2 token" "cryptsetup luksDump /dev/disk/by-partlabel/$v 2>/dev/null | grep -c systemd-fido2" 1
-  check "the $v volume now has two keyslots (the old key and the token's)" "cryptsetup luksDump /dev/disk/by-partlabel/$v 2>/dev/null | grep -cE '^  [0-9]+: luks2'" 2
+  # cryptsetup prints the token details to stderr (the keyslot lines go to stdout),
+  # so merge the streams: 2>/dev/null here would hide the very thing being counted.
+  check "the $v volume got a systemd-fido2 token" "cryptsetup luksDump /dev/disk/by-partlabel/$v 2>&1 | grep -c systemd-fido2" 1
+  check "the $v volume now has two keyslots (the old key and the token's)" "cryptsetup luksDump /dev/disk/by-partlabel/$v 2>&1 | grep -cE '^  [0-9]+: luks2'" 2
 done
 check "no failed units" 'systemctl --failed --no-legend | wc -l' 0
 
@@ -98,7 +100,7 @@ echo "boot: without the token"
 "$vm" start net
 if [[ $ENCRYPT == tpm2 ]]; then
   "$vm" wait
-  check "the boot without the key still boots (the TPM unlocks /var before the token is tried)" 'true' true
+  check "the boot without the key still boots (the TPM unlocks /var before the token is tried)" 'echo up' up
   check "/var is the unlocked var volume" 'findmnt -rno SOURCE -t xfs /var' /dev/mapper/var
   check "no failed units" 'systemctl --failed --no-legend | wc -l' 0
 else

@@ -140,15 +140,17 @@ check "running from the disk" 'lsblk -srno NAME "$(findmnt -no SOURCE /sysroot)"
 case "$ENCRYPT" in
   tpm2)
     check "the root is LUKS2" 'cryptsetup status root | sed -n "s/^ *type: *//p"' LUKS2
-    check "the root has one key slot, a TPM2 token" 'cryptsetup luksDump /dev/disk/by-partlabel/root 2>/dev/null | grep -cE "^  [0-9]+: (luks2|systemd-tpm2)"' 2
-    check "the var volume has a TPM2 token" 'cryptsetup luksDump /dev/disk/by-partlabel/var 2>/dev/null | grep -cE "^  [0-9]+: systemd-tpm2"' 1 ;;
+    # cryptsetup prints the token details to stderr; merge the streams so the
+    # token counts do not depend on which side of that boundary the line falls.
+    check "the root has one key slot, a TPM2 token" 'cryptsetup luksDump /dev/disk/by-partlabel/root 2>&1 | grep -cE "^  [0-9]+: (luks2|systemd-tpm2)"' 2
+    check "the var volume has a TPM2 token" 'cryptsetup luksDump /dev/disk/by-partlabel/var 2>&1 | grep -cE "^  [0-9]+: systemd-tpm2"' 1 ;;
   luks|none)
     [[ $ENCRYPT == luks ]] && {
       check "the root is LUKS2" 'cryptsetup status root | sed -n "s/^ *type: *//p"' LUKS2
-      check "the root has one key slot and no tokens (empty key)" 'cryptsetup luksDump /dev/disk/by-partlabel/root 2>/dev/null | grep -cE "^  [0-9]+: (luks2|systemd-tpm2)"' 1
+      check "the root has one key slot and no tokens (empty key)" 'cryptsetup luksDump /dev/disk/by-partlabel/root 2>&1 | grep -cE "^  [0-9]+: (luks2|systemd-tpm2)"' 1
     }
     # no TPM is attached in this case, so the installer gave /var an empty key slot too
-    check "the var volume has one key slot and no tokens (empty key)" 'cryptsetup luksDump /dev/disk/by-partlabel/var 2>/dev/null | grep -cE "^  [0-9]+: (luks2|systemd-tpm2)"' 1 ;;
+    check "the var volume has one key slot and no tokens (empty key)" 'cryptsetup luksDump /dev/disk/by-partlabel/var 2>&1 | grep -cE "^  [0-9]+: (luks2|systemd-tpm2)"' 1 ;;
 esac
 if [[ ${FIDO2:-0} == 1 ]]; then
   # The installer VM has no FIDO2 device: the enrolment waited (a short poll
@@ -157,9 +159,11 @@ if [[ ${FIDO2:-0} == 1 ]]; then
   [[ $(grep -c "No FIDO2 key present" phases.txt) == 1 ]] && ok "the installer warned and continued without a FIDO2 key" || bad "no 'No FIDO2 key present' warning in the installer log"
   case "$ENCRYPT" in
     tpm2|luks)
-      check "no FIDO2 token in the root (no key was enrolled)" 'cryptsetup luksDump /dev/disk/by-partlabel/root 2>/dev/null | grep -c systemd-fido2' 0 ;;
+      # cryptsetup prints the token details to stderr; 2>/dev/null would make this
+  # check pass even if a token were present.
+  check "no FIDO2 token in the root (no key was enrolled)" 'cryptsetup luksDump /dev/disk/by-partlabel/root 2>&1 | grep -c systemd-fido2' 0 ;;
   esac
-  check "no FIDO2 token in /var (no key was enrolled)" 'cryptsetup luksDump /dev/disk/by-partlabel/var 2>/dev/null | grep -c systemd-fido2' 0
+  check "no FIDO2 token in /var (no key was enrolled)" 'cryptsetup luksDump /dev/disk/by-partlabel/var 2>&1 | grep -c systemd-fido2' 0
 fi
 check "/var is the unlocked var volume" 'findmnt -rno SOURCE -t xfs /var' /dev/mapper/var
 check "/var is xfs" 'stat -f -c %T /var' xfs
