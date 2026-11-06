@@ -12,9 +12,10 @@
 # or the empty keyslot, --unlock-headless), then reboot without the token:
 #
 #   ENCRYPT=luks (the no-tpm image: root and /var are empty-key volumes) -
-#   the volumes are token-gated: the initrd waits the 30-second token timeout,
-#   the unit fails, and the boot never reaches a login (the empty key is not
-#   tried after the token wait, docs/encryption.md).
+#   a boot without the key still boots: the initrd waits the 30-second token
+#   timeout per volume, the wait times out, and the empty key unlocks
+#   (docs/encryption.md); the test checks the delay between the two unlock
+#   audit lines.
 #
 #   ENCRYPT=tpm2 (the tpm2 image: the root is sealed to the software TPM, /var
 #   too) - the TPM unlocks /var before the token is tried, so a boot without
@@ -104,13 +105,25 @@ if [[ $ENCRYPT == tpm2 ]]; then
   check "/var is the unlocked var volume" 'findmnt -rno SOURCE -t xfs /var' /dev/mapper/var
   check "no failed units" 'systemctl --failed --no-legend | wc -l' 0
 else
-  # The empty-key volumes are token-gated: the initrd waits the 30-second token
-  # timeout, the unit fails, and the boot never reaches a login.
-  for _ in $(seq 180); do grep -aq 'login: ' "$B/target.log" 2>/dev/null && break; sleep 1; done
-  if grep -aq 'login: ' "$B/target.log" 2>/dev/null; then bad "the boot without the token reached a login (should be token-gated)"
-  else ok "the boot without the token never reached a login (token-gated)"; fi
-  if grep -aq "Security token.*not present for unlocking volume root" "$B/target.log"; then ok "the initrd waited for the FIDO2 token and gave up"
-  else bad "no 'Security token not present' in the initrd log"; fi
+  # The empty-key volumes are not token-gated: the initrd waits the 30-second
+  # token timeout per volume, then unlocks with the empty key, and the boot
+  # reaches a login (docs/encryption.md).
+  "$vm" wait
+  check "the boot without the key reaches a login (the empty key is tried after the 30 s token wait)" 'echo up' up
+  check "/var is the unlocked var volume" 'findmnt -rno SOURCE -t xfs /var' /dev/mapper/var
+  # The evidence, all in the booted system's journal (the initrd's journal is
+  # flushed into it, though the serial log never carried it): 'Security token
+  # not present' starts the 30-second wait per volume, 'Timed out waiting for
+  # security device' ends it, and the empty key unlocks right after. One
+  # kernel 'module=crypt' audit record per unlocked volume (type=1338, the
+  # audit(ts:seq) pattern only matches the kmsg copy); the gap between the two
+  # carries the second volume's wait.
+  check "the initrd reported the missing token for the root volume" "journalctl -b -a | grep -ac 'Security token not present for unlocking volume root'" 1
+  check "the token wait timed out and the empty key fell through" "journalctl -b -a | grep -ac 'Timed out waiting for security device'" 2
+  gap=$(SSH_USER=root "$vm" ssh "journalctl -b -a | grep -a 'module=crypt' | grep -oE 'audit\([0-9]+\.[0-9]+' | cut -d'(' -f2 | awk 'NR==1{f=\$1} END{if (NR>=2) printf \"%d\", \$1-f}'" 2>/dev/null || true)
+  if [[ ${gap:-0} =~ ^[0-9]+$ ]] && [[ $gap -ge 25 ]]; then ok "the boot waited for the key: the two unlock audit lines are $gap s apart"
+  else bad "the two unlock audit lines are ${gap:-missing} s apart, want >= 25 (the 30 s token wait before the empty-key fallback)"
+  fi
 fi
 "$vm" stop
 exit $fail
