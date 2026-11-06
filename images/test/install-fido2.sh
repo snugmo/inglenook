@@ -8,8 +8,8 @@
 # install-from-stick.sh FIDO2=1). This test covers the other end of the
 # feature: install a disk (reusing install-from-stick.sh), boot it, enrol the
 # software token into the LUKS volumes' 1 MiB headers from the booted system
-# (systemd-cryptenroll on an active LUKS2 device fetches the volume key from
-# the kernel), then reboot without the token:
+# (the volume key is fetched the way the volume was sealed - the TPM2 token,
+# or the empty keyslot, --unlock-headless), then reboot without the token:
 #
 #   ENCRYPT=luks (the no-tpm image: root and /var are empty-key volumes) -
 #   the volumes are token-gated: the initrd waits the 30-second token timeout,
