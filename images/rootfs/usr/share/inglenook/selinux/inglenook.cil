@@ -16,8 +16,9 @@
 
 ; systemd-homework (the helper systemd-homed spawns to create, mount and
 ; resize home areas) does an fstatfs-style getattr on the pidfs filesystem.
-; Seen when creating LUKS and directory homes on Fedora 45 (selinux-policy
-; 45.20); harmless to allow.
+; Found creating LUKS and directory homes on Fedora 45 prerelease
+; (selinux-policy 45.20); still missing from the release policy (45.23), so
+; the allow stays. Harmless to allow.
 (allow systemd_homework_t pidfs_t (filesystem (getattr)))
 
 ; run0 authenticates through polkit-agent-helper, which runs as a
