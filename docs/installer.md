@@ -171,11 +171,19 @@ offers it where the boot path would actually try it:
 | /var | yes (the initrd's /var unlock already tries `fido2-device=auto`) | yes |
 
 Each enrolment writes one `systemd-fido2` token into the volume's 1 MiB JSON
-LUKS2 header: no keyslot is added or removed, so the TPM secret (or the empty
-key) keeps working and remains the recovery path — a boot without the key still
-boots (on an empty-key volume, after the initrd's short token wait). To make
-the key the *only* way to unlock a volume later, wipe the other keyslot from
-the booted system (docs/encryption.md). `INSTALL_FIDO2=1|0` answers the
+LUKS2 header and adds one new keyslot the token's secret unlocks (the volume
+key, keyed by a base64-encoded value only the key can reconstruct — the
+mechanism all LUKS2 tokens use, docs/encryption.md): the existing keys (the
+TPM seal, or the empty key) are untouched and keep working. What that means at
+boot depends on how the volume was sealed: a TPM-sealed /var still unlocks from
+the TPM first, so a boot without the key still boots (the key is the fallback
+for a lost TPM); a volume with only the empty key — the no-tpm image, or /var
+on the tpm2 image when there is no TPM — is token-gated from then on: a boot
+without the key waits the initrd's 30-second token timeout and fails, and the
+empty key is not tried after that (docs/encryption.md) — so the key must be in
+hand from the first boot on. To
+make the key the *only* way to unlock a volume later, wipe the other keyslots
+from the booted system (docs/encryption.md). `INSTALL_FIDO2=1|0` answers the
 question; with `1` and no key in hand the installer warns and continues without
 it.
 

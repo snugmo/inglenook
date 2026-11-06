@@ -117,13 +117,16 @@ options (a crypttab option since v246); (4) prompt the user.
   *base64-encoded TPM2 secret*, not by an empty string — so `try-empty-password`
   on such a volume is a guaranteed *failed* attempt that falls through to the
   TPM2/PIN/prompt paths, never an unlock.
-- LUKS2 tokens (FIDO2, TPM2, PKCS#11) live in the volume's 1 MiB JSON header,
-  **independent of keyslots**. Enrolling a token adds no keyslot and wipes none, and
-  the enrolled set is readable without unlocking: `dd if=<dev> bs=1M count=1 | grep
-  '"type":"fido2"'`.
-- That independence is what makes "install with an empty slot, enrol a token, wipe the
-  empty slot" work. The wipe must be authorised by **another** live slot — cryptsetup
-  refuses to authorise a wipe with the very slot being wiped.
+- LUKS2 tokens (FIDO2, TPM2, PKCS#11) live in the volume's 1 MiB JSON header and
+  **reference the keyslot they unlock**: in systemd 262 enrolling one adds a new
+  keyslot holding the volume key keyed by a base64-encoded secret only the token
+  can reconstruct (FIDO2: `HMAC-SHA256(internal key, salt)`; PKCS#11: the token's
+  decrypted key — cryptenroll-{fido2,pkcs11}.c), and wipes none; the enrolled set
+  is readable without unlocking: `dd if=<dev> bs=1M count=1 | grep '"type":"fido2"'`.
+- That is what makes "install with an empty slot, enrol a token, wipe the empty
+  slot" work: the new token slot can unlock the volume, so the empty slot can be
+  wiped authorised by it — and the wipe must be authorised by **another** live slot
+  than the one being wiped (cryptsetup refuses the latter).
 - `systemd-repart` **can** make the empty-keyslot root natively: `Encrypt=key-file`
   (v247; also `key-file+tpm2`; a boolean `Encrypt=` maps to it), with the key from
   `KeyFile=` (v259, absolute path only, otherwise ignored) or the global
@@ -244,12 +247,17 @@ still closed (before the install itself), with `systemd-cryptenroll --fido2-devi
 and the volume key fetched the same way the volume is sealed: `--unlock-empty` for
 the no-TPM variant's empty-key root and /var, `--unlock-tpm2-device=auto` for the
 TPM-sealed /var (both variants; its boot path, the initrd's /var unlock, already
-tries `fido2-device=auto`). The token is added on top of the existing key: no
-keyslot is touched, so the state after such an install is "enrolled, token present
-(or absent at boot)" in the matrix above, never "fresh". The tpm2 variant's
-TPM-sealed *root* is not offered: the unit gpt-auto generates for it carries no
-FIDO2 option (a static drop-in cannot add one safely), so an enrolled token would
-never be tried there.
+tries `fido2-device=auto`). Each enrolment adds a keyslot and a `systemd-fido2`
+token (see the LUKS2 facts); the existing keys (the TPM seal, the empty key) are
+untouched, so the state after such an install is "enrolled, token present (or
+absent at boot)" in the matrix above, never "fresh". At boot, a TPM-sealed volume
+still unlocks from the TPM first, so the key there is the fallback for a lost
+TPM; a volume with only the empty key is token-gated from the first boot on — a
+boot without the key fails after the 30-second token wait, and the empty key is
+not tried after it (the no-TPM image always; /var on the tpm2 image when there is
+no TPM). The tpm2 variant's TPM-sealed *root* is not offered: the unit gpt-auto
+generates for it carries no FIDO2 option (a static drop-in cannot add one safely),
+so an enrolled token would never be tried there.
 
 Remaining open items:
 
