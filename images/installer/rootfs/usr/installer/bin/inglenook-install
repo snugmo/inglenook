@@ -404,7 +404,8 @@ wait_for_fido2() {
   [ -n "$(fido2_devices)" ]
 }
 enroll_volumes_fido2() {
-  local vols=$1 vol part method
+  local vols=$1 vol part method failed=0
+  [[ -n $vols ]] || return 0
   say "Enrolling the FIDO2 security key: $vols"
   if wait_for_fido2; then
     fido2_devices | sed 's/^/  /'
@@ -413,9 +414,14 @@ enroll_volumes_fido2() {
       else part=/dev/disk/by-partlabel/var
            case "$var_encrypt" in tpm2) method=--unlock-tpm2-device=auto;; *) method=--unlock-empty;; esac; fi
       printf '  %s (%s, via %s):\n' "$vol" "$part" "$method"
-      systemd-cryptenroll --fido2-device=auto "$method" "$part" | sed 's/^/    /'
+      # Per-volume: a failure (the key pulled mid-write, a TPM that will not unseal)
+      # must not stop the remaining volumes; the failed one keeps its current keys.
+      if ! systemd-cryptenroll --fido2-device=auto "$method" "$part" | sed 's/^/    /'; then
+        warn "  $vol: enrolment failed, it keeps its current keys (a key can be enrolled later with systemd-cryptenroll, run0)."
+        failed=1
+      fi
     done
-    FIDO2_ENROLLED=1
+    [ $failed = 0 ] && FIDO2_ENROLLED=1
   else
     warn "No FIDO2 key present: the volumes keep only their current keys (a key can be enrolled later with systemd-cryptenroll, run0)."
     return 1
@@ -562,9 +568,19 @@ if [ -n "$RECOVERY" ]; then
 fi
 if [ -n "${FIDO2_ENROLLED:-}" ]; then
   printf '\n  A FIDO2 security key now unlocks %s at boot: insert (and touch) the key when\n' "$fido2_what"
-  printf '  the boot asks for it; if it has a PIN, the boot asks for that too. The key the\n'
-  printf '  volumes are sealed with (the TPM, or the empty key) is still there, so a boot\n'
-  printf '  without the key still boots (on an empty-key volume, after a short wait).\n'
+  printf '  the boot asks for it; if it has a PIN, the boot asks for that too.\n'
+  if [ "$root_encrypt" = key-file ]; then
+    printf '  The root and /var volumes are now token-gated: with a token in the header, a\n'
+    printf '  boot without the key waits 30 s and fails (the empty key is not tried after\n'
+    printf '  the token wait). Keep the key with you from the first boot on.\n'
+  elif [ "$var_encrypt" = key-file ]; then
+    printf '  The /var volume is now token-gated: with a token in the header, a boot without\n'
+    printf '  the key waits 30 s and fails (the empty key is not tried after the token wait).\n'
+    printf '  Keep the key with you from the first boot on.\n'
+  else
+    printf '  The TPM the volumes are sealed with still unlocks first, so a boot without the\n'
+    printf '  key still boots; the key is the fallback for a lost TPM.\n'
+  fi
 fi
 printf '\n'
 if [ -n "$FIRST_USER" ]; then
