@@ -15,14 +15,20 @@
 # The two image variants differ in how a disk without a TPM is encrypted:
 # the tpm2 variant (the default) leaves the root unencrypted, and the no-tpm
 # variant makes it a LUKS2 volume with an empty key slot that unlocks
-# hands-off and can receive a FIDO2 token later. /var is LUKS2 either way:
-# sealed to the machine's TPM when there is one, empty slot otherwise.
+# hands-off and can receive a FIDO2 token. /var is LUKS2 either way: sealed to
+# the machine's TPM when there is one, empty slot otherwise. On request the
+# installer also enrols a FIDO2 security key into the volumes' LUKS2 headers,
+# so the key unlocks them at boot alongside the TPM (or the empty key): /var
+# in both variants, the root on the no-tpm variant (the tpm2 variant's root
+# boots from the TPM only; docs/encryption.md).
 #
 # Questions are skipped when their answer is in the environment (the tests do
 # that): INSTALL_DISK, INSTALL_ROOT_SIZE (50G), INSTALL_ENCRYPT (tpm2|none on
 # the tpm2 variant, luks|none on the no-tpm variant),
 # INSTALL_RECOVERY_KEY (1|0), INSTALL_CONSOLE (1|0: a serial console on the
 # installed system: the stick's UKI addon, copied to the system's ESP),
+# INSTALL_FIDO2 (1|0: enrol a FIDO2 security key to unlock the encrypted
+# volumes at boot: /var in both variants, the root on the no-tpm variant),
 # INSTALL_TOKEN (1|0: enrol a FIDO2 key for the first user at the first boot), INSTALL_USER / INSTALL_REALNAME / INSTALL_USER_PASSWORD
 # (the first user; INSTALL_NO_USER=1 skips it), INSTALL_YES=1 (assume yes everywhere,
 # including the wipe), INSTALL_NO_REBOOT=1, INSTALL_TARGET_IMGREF, INSTALL_IMAGE_DIR.
@@ -222,6 +228,30 @@ if [ "$INSTALL_ENCRYPT" = tpm2 ] && [ -z "${INSTALL_RECOVERY_KEY:-}" ]; then
   yes_no "Create a recovery key (needed if the TPM is ever cleared or the board replaced)?" y && INSTALL_RECOVERY_KEY=1 || INSTALL_RECOVERY_KEY=0
 fi
 
+# A FIDO2 security key (a YubiKey ...) enrolled into the LUKS2 header of a volume
+# unlocks it at boot, next to the key the volume is sealed with: the boot path
+# already tries fido2-device=auto on /var (the initrd's var-mount) and on the
+# no-tpm variant's root (its initrd drop-in). The tpm2 variant's root is not
+# offered: the unit gpt-auto generates for it carries no FIDO2 option (a static
+# drop-in could not add one safely, docs/encryption.md), so an enrolled key would
+# never be tried there. Enrolment itself (the key in hand) happens in step 6,
+# when the volumes exist and are still closed.
+FIDO2_VOL=0
+fido2_what=
+[ "$root_encrypt" = key-file ] && fido2_what="the root and /var volumes"
+[ "$root_encrypt" != key-file ] && [ -n "$var_encrypt" ] && fido2_what="the /var volume"
+if [ -n "$fido2_what" ]; then
+  if [ -z "${INSTALL_FIDO2:-}" ]; then
+    printf '\n'
+    printf 'A FIDO2 security key (a YubiKey ...) can unlock %s at boot.\n' "$fido2_what"
+    printf 'The key is added on top of what is already there (the TPM, or the empty key): nothing is\n'
+    printf 'replaced, and a boot without the key still boots.\n'
+    printf 'The installer then asks you to insert the key (set its PIN beforehand, if it has one).\n'
+    yes_no "Enrol a FIDO2 security key to unlock $fido2_what?" n && INSTALL_FIDO2=1 || INSTALL_FIDO2=0
+  fi
+  [ "${INSTALL_FIDO2:-0}" = 1 ] && FIDO2_VOL=1
+fi
+
 # --- 5b. The first user ----------------------------------------------------------------------------
 FIRST_USER=
 if [ -z "${INSTALL_NO_USER:-}" ]; then
@@ -335,6 +365,55 @@ for l in ESP root var; do for _ in $(seq 20); do [ -e "/dev/disk/by-partlabel/$l
 [ -e /dev/disk/by-partlabel/ESP ] && [ -e /dev/disk/by-partlabel/root ] && [ -e /dev/disk/by-partlabel/var ] \
   || die "A partition (ESP, root or var) did not appear after repartitioning."
 ROOTPART=/dev/disk/by-partlabel/root
+
+# The FIDO2 enrolment of step 5: the volumes exist now and are still closed, so the
+# key can be written into their LUKS2 JSON headers. Each volume gets one
+# systemd-fido2 token: it adds no keyslot (the TPM secret or the empty key keeps
+# working - the token is a second way to unlock, the old key stays the recovery
+# path), the volume key is fetched through the same method the volume is sealed
+# with (--unlock-tpm2-device=auto or --unlock-empty), and the key's PIN, when it
+# has one, is asked through ask-password on the console.
+fido2_devices() { systemd-cryptenroll --fido2-device=list 2>/dev/null | grep '^/dev/hidraw' || true; }
+wait_for_fido2() {
+  local n=0 reply
+  if [ -n "${INSTALL_YES:-}" ]; then
+    # Unattended: nobody to prompt, so a short poll and on.
+    while [ -z "$(fido2_devices)" ] && [ $n -lt 10 ]; do n=$((n+1)); sleep 1; done
+  else
+    printf '\n  Insert the security key now (and touch it if it asks); type "skip" to continue without it.\n'
+    while :; do
+      [ -n "$(fido2_devices)" ] && return 0
+      reply=; read -rt 5 reply || { [ -t 0 ] || return 1; }  # a closed console ends the wait
+      case "$reply" in skip|Skip|SKIP) return 1;; esac
+      n=$((n+1)); [ $(( n % 12 )) -eq 0 ] && printf '  (still waiting for the key ...)\n'
+    done
+  fi
+  [ -n "$(fido2_devices)" ]
+}
+enroll_volumes_fido2() {
+  local vols=$1 vol part method
+  say "Enrolling the FIDO2 security key: $vols"
+  if wait_for_fido2; then
+    fido2_devices | sed 's/^/  /'
+    for vol in $vols; do
+      if [ "$vol" = root ]; then part=$ROOTPART; method=--unlock-empty
+      else part=/dev/disk/by-partlabel/var
+           case "$var_encrypt" in tpm2) method=--unlock-tpm2-device=auto;; *) method=--unlock-empty;; esac; fi
+      printf '  %s (%s, via %s):\n' "$vol" "$part" "$method"
+      systemd-cryptenroll --fido2-device=auto "$method" "$part" | sed 's/^/    /'
+    done
+    FIDO2_ENROLLED=1
+  else
+    warn "No FIDO2 key present: the volumes keep only their current keys (a key can be enrolled later with systemd-cryptenroll, run0)."
+    return 1
+  fi
+}
+if [ "$FIDO2_VOL" = 1 ]; then
+  fido2_vols=
+  [ "$root_encrypt" = key-file ] && fido2_vols="root"
+  [ -n "$var_encrypt" ] && fido2_vols="${fido2_vols:+$fido2_vols }var"
+  enroll_volumes_fido2 "$fido2_vols" || true
+fi
 rootdev=$ROOTPART
 case "$INSTALL_ENCRYPT" in
   tpm2)
@@ -468,6 +547,12 @@ say "Installation complete."
 if [ -n "$RECOVERY" ]; then
   printf '\n  RECOVERY KEY for the encrypted root: %s\n  Keep it somewhere safe and off this machine.\n' "$RECOVERY"
 fi
+if [ -n "${FIDO2_ENROLLED:-}" ]; then
+  printf '\n  A FIDO2 security key now unlocks %s at boot: insert (and touch) the key when\n' "$fido2_what"
+  printf '  the boot asks for it; if it has a PIN, the boot asks for that too. The key the\n'
+  printf '  volumes are sealed with (the TPM, or the empty key) is still there, so a boot\n'
+  printf '  without the key still boots (on an empty-key volume, after a short wait).\n'
+fi
 printf '\n'
 if [ -n "$FIRST_USER" ]; then
   printf "  Log in as '%s' after the first boot; use run0 for administrative tasks.\n" "$FIRST_USER"
@@ -479,12 +564,16 @@ if [ "${INSTALL_CONSOLE:-0}" = 1 ]; then
   printf '  delete that file to turn it off again.\n'
 fi
 if [ "$var_encrypt" = tpm2 ]; then
-  printf '  To add a recovery key or a FIDO2 token for the /var volume later, use\n'
-  printf '  systemd-cryptenroll (run0) on /dev/disk/by-partlabel/var.\n'
+  if [ -z "${FIDO2_ENROLLED:-}" ]; then
+    printf '  To add a recovery key or a FIDO2 token for the /var volume later, use\n'
+    printf '  systemd-cryptenroll (run0) on /dev/disk/by-partlabel/var.\n'
+  fi
 elif [ "$var_encrypt" = key-file ]; then
-  printf '  The /var volume has an empty key and unlocks hands-off. To make it need a\n'
-  printf '  FIDO2 token (or a recovery key) instead, enrol one later with systemd-cryptenroll\n'
-  printf '  (run0) on /dev/disk/by-partlabel/var.\n'
+  if [ -z "${FIDO2_ENROLLED:-}" ]; then
+    printf '  The /var volume has an empty key and unlocks hands-off. To make it need a\n'
+    printf '  FIDO2 token (or a recovery key) instead, enrol one later with systemd-cryptenroll\n'
+    printf '  (run0) on /dev/disk/by-partlabel/var.\n'
+  fi
 fi
 if [ -z "${INSTALL_NO_REBOOT:-}" ]; then
   while [ -n "$SRC_DISK" ] && [ -b "$SRC_DISK" ]; do
