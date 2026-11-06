@@ -36,6 +36,7 @@ IWORK=${WORK:-$REPO/build/install-fido2}
 B=$IWORK-boot
 vm=$HERE/vm.sh
 ENCRYPT=${ENCRYPT:-luks}
+export ENCRYPT   # the install-from-stick.sh run below must see the same value
 [[ $ENCRYPT == tpm2 || $ENCRYPT == luks ]] || { echo "ENCRYPT must be tpm2 or luks (got '$ENCRYPT')" >&2; exit 1; }
 ref=${1:-}
 if [[ -z $ref ]]; then
@@ -72,13 +73,18 @@ tar -C "$HERE/token" -c . -C "$HERE" softfido.py | g 'mkdir -p /var/tmp/token &&
 g 'systemctl stop softfido 2>/dev/null; modprobe uhid; systemd-run -q --unit=softfido python3 /var/tmp/token/softfido.py /var/tmp/token/state && sleep 2'
 check "systemd sees the FIDO2 token" 'systemd-cryptenroll --fido2-device=list | grep -c "^/dev/hidraw"' 1
 
-# Enrolment from the booted system: the volume is active, so cryptenroll fetches
-# the volume key from the kernel (crypt_volume_key_get) and adds one keyslot
-# (the volume key, keyed by the token's secret) plus one systemd-fido2 token.
+# Enrolment from the booted system: --unlock-headless gets the volume key the
+# same way the volume was sealed (the TPM2 token, or the empty keyslot - no
+# interactive prompt, unlike the default, which asks for a passphrase), and
+# adds one keyslot (the volume key, keyed by the token's secret) plus one
+# systemd-fido2 token to the 1 MiB header. --fido2-with-client-pin=no: the
+# software token has no PIN (systemd 262 defaults to one, and the enrolment
+# would fail against a token without); user presence stays required and
+# softfido grants it automatically.
 VOLS=
 [[ $ENCRYPT == luks ]] && VOLS="root var" || VOLS="var"
 for v in $VOLS; do
-  g "systemd-cryptenroll --fido2-device=auto /dev/disk/by-partlabel/$v"
+  g "timeout 120 systemd-cryptenroll --fido2-device=auto --fido2-with-client-pin=no --unlock-headless /dev/disk/by-partlabel/$v"
 done
 for v in $VOLS; do
   check "the $v volume got a systemd-fido2 token" "cryptsetup luksDump /dev/disk/by-partlabel/$v 2>/dev/null | grep -c systemd-fido2" 1
