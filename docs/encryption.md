@@ -239,6 +239,18 @@ zero-length-key default), and opens both volumes with the empty password
 in the `Encrypt=` values (`tpm2`) and the options the installer passes to its own
 `systemd-cryptsetup attach` calls.
 
+The installer can enrol a FIDO2 key into the volumes' LUKS2 headers while they are
+still closed (before the install itself), with `systemd-cryptenroll --fido2-device=auto`
+and the volume key fetched the same way the volume is sealed: `--unlock-empty` for
+the no-TPM variant's empty-key root and /var, `--unlock-tpm2-device=auto` for the
+TPM-sealed /var (both variants; its boot path, the initrd's /var unlock, already
+tries `fido2-device=auto`). The token is added on top of the existing key: no
+keyslot is touched, so the state after such an install is "enrolled, token present
+(or absent at boot)" in the matrix above, never "fresh". The tpm2 variant's
+TPM-sealed *root* is not offered: the unit gpt-auto generates for it carries no
+FIDO2 option (a static drop-in cannot add one safely), so an enrolled token would
+never be tried there.
+
 Remaining open items:
 
 - The drop-in couples the image to gpt-auto's device naming
@@ -255,7 +267,8 @@ Remaining open items:
   (see "Levers that do not work"), so a locked-down system gets `console=`
   without baking it into the UKI and without any test-only build flag.
 
-After first boot the first user enrolls a token on the booted system
+If the installer did not enrol the key (or for a volume it could not offer),
+the first user enrolls a token on the booted system
 (`run0 systemd-cryptenroll --fido2-device=auto /dev/mapper/root`) and wipes
 slot 0 through the token (the empty slot is the one being wiped, so its own
 password cannot authorise the wipe — see the LUKS2 facts above). Every boot

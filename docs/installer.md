@@ -84,7 +84,7 @@ Boot the stick (the console shows a banner), then run `inglenook-install`. It:
    the rest of the disk becomes /var);
 4. asks how to encrypt, per the variant (above): TPM-sealed or plain on the tpm2 image,
    empty-slot LUKS or plain on the no-tpm image, with a recovery key offered for the
-   TPM-sealed root;
+   TPM-sealed root, and (below) whether a FIDO2 key should unlock the volumes too;
 5. asks for the **first user** (below), because root is locked and there is no other account, so
    without one nobody could log in;
 6. asks whether the installed system gets a **serial console** (default no): the stick's
@@ -99,7 +99,9 @@ Boot the stick (the console shows a banner), then run `inglenook-install`. It:
    systemd-repart man page). `/var` is all the space after the root, XFS on LUKS2
    (sealed to the TPM when there is one, an empty key slot otherwise — there is no
    unencrypted mode: an empty key is easier to manage than no layer, and a FIDO2 token
-   can be enrolled later without an encrypt-in-place). The installer opens the root and
+   can be enrolled later without an encrypt-in-place). If a FIDO2 key was asked for
+   (below), it is enrolled into the volumes' LUKS2 headers right after partitioning,
+   while they are still closed. The installer then opens the root and
    /var, and **/var doubles as the scratch space**: it unpacks the image from the stick
    into /var, says the stick is no longer needed, runs `bootc install to-filesystem`
    straight from the initrd (no container), writes the machine id into the new system
@@ -113,7 +115,8 @@ Boot the stick (the console shows a banner), then run `inglenook-install`. It:
 
 Questions whose answer is in the environment are not asked (`INSTALL_DISK`,
 `INSTALL_ROOT_SIZE`, `INSTALL_ENCRYPT=tpm2|none` on the tpm2 variant, `luks|none` on the
-no-tpm one, `INSTALL_RECOVERY_KEY`, `INSTALL_CONSOLE=1|0`, `INSTALL_USER`,
+no-tpm one, `INSTALL_RECOVERY_KEY`, `INSTALL_FIDO2=1|0` (a security key for the
+encrypted volumes, below), `INSTALL_CONSOLE=1|0`, `INSTALL_USER`,
 `INSTALL_REALNAME`, `INSTALL_USER_PASSWORD`, `INSTALL_NO_USER=1`, `INSTALL_YES=1`
 (answers yes to every yes/no question, including the console one), `INSTALL_NO_REBOOT=1`,
 `INSTALL_TARGET_IMGREF`, `INSTALL_IMAGE_DIR`); the tests use that.
@@ -146,6 +149,35 @@ systemd-homed account:
 - Without disk encryption the password sits on the unencrypted disk in `/etc/credstore` until the first
   boot deletes the file (and stays recoverable from free space); the installer warns about that.
 - Tokens (FIDO2, PKCS#11) for the account: [tokens.md](tokens.md).
+
+## FIDO2 keys for the encrypted volumes
+
+The installer can also make a FIDO2 security key (a YubiKey ...) unlock the
+encrypted volumes at boot, at the same time as the TPM (or the empty key) is set
+up. After the question in step 4 (above) it happens in step 7, when the volumes
+exist and are still closed: the installer waits for the key — a short poll when
+unattended (`INSTALL_YES=1`), until it is inserted or `skip` is typed otherwise —
+and runs `systemd-cryptenroll --fido2-device=auto` on each volume it is offered
+for: `--unlock-tpm2-device=auto` on the TPM-sealed /var, `--unlock-empty` on the
+empty-key volumes. The key's PIN, when it has one, is asked through
+ask-password on the console.
+
+What the key ends up unlocking is fixed by the boot path, so the installer only
+offers it where the boot path would actually try it:
+
+| volume | tpm2 image | no-tpm image |
+| --- | --- | --- |
+| root | never (a TPM-sealed root boots from the TPM only: gpt-auto's generated unit carries no FIDO2 option, and a static drop-in cannot add one safely — docs/encryption.md) | the empty-key root (the variant's initrd drop-in tries `fido2-device=auto`) |
+| /var | yes (the initrd's /var unlock already tries `fido2-device=auto`) | yes |
+
+Each enrolment writes one `systemd-fido2` token into the volume's 1 MiB JSON
+LUKS2 header: no keyslot is added or removed, so the TPM secret (or the empty
+key) keeps working and remains the recovery path — a boot without the key still
+boots (on an empty-key volume, after the initrd's short token wait). To make
+the key the *only* way to unlock a volume later, wipe the other keyslot from
+the booted system (docs/encryption.md). `INSTALL_FIDO2=1|0` answers the
+question; with `1` and no key in hand the installer warns and continues without
+it.
 
 ## Tests
 
@@ -181,8 +213,7 @@ console shell is an interactive bash: a `!!` in a command is history expansion, 
 
 ## Not done yet
 
-Swap, FIDO2 enrollment of the encrypted *volumes* during the install (the empty-slot
-volumes accept a token at any time after first boot, `systemd-cryptenroll` with `run0`;
-only the account's key is offered at the first boot), an unattended mode driven by a
-config file, a PCR policy for the TPM keys, LVM (an addon if ever needed), and any test
-on real hardware.
+Swap, an unattended mode driven by a config file, a PCR policy for the TPM keys,
+LVM (an addon if ever needed), and any test on real hardware. (FIDO2 keys for the
+*volumes* are offered by the installer, above; the account's key is offered at the
+first boot.)
