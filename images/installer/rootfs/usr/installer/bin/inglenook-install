@@ -123,6 +123,7 @@ fi
 DISK=$INSTALL_DISK
 [ -b "$DISK" ] && [ "$(lsblk -dno TYPE "$DISK")" = disk ] || die "$DISK is not a disk."
 [ "$DISK" != "$SRC_DISK" ] || die "$DISK is the disk the image is read from."
+[ "$(lsblk -dno RO "$DISK")" = 0 ] || die "$DISK is read-only; it cannot be installed to."
 lsblk -rno MOUNTPOINTS "$DISK" | grep -q . && die "$DISK has mounted filesystems; it is in use."
 DISK_BYTES=$(blockdev --getsize64 "$DISK")
 
