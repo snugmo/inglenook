@@ -200,7 +200,17 @@ it.
   credential is gone. `luks`
   needs a stick made from the no-tpm image variant (the tpm2 installer refuses it), and
   that run also exercises the variant's FIDO2/empty-slot root unlock drop-in
-  (docs/encryption.md), since the installed disk boots without a TPM.
+  (docs/encryption.md), since the installed disk boots without a TPM. With
+  `FIDO2=1` the installer's FIDO2 question is answered yes but no key is present: it
+  warns and continues, and the test checks that nothing was enrolled.
+- `images/test/install-fido2.sh`: the FIDO2 key on the LUKS volumes, end to end: boot a
+  disk installed by install-from-stick, enrol a software FIDO2 token (softfido.py in the
+  booted system) into the volumes' LUKS2 headers, and reboot without the token: on the
+  no-tpm image (`ENCRYPT=luks`) the empty-key volumes are token-gated and the boot never
+  reaches a login; on the tpm2 image (`ENCRYPT=tpm2`) the TPM unlocks /var before the
+  token is tried, so the boot succeeds (the key is the fallback). The installer's own
+  enrolment (the volumes still closed in the initrd) needs a FIDO2 device in the initrd,
+  which has no python3, so it is covered only through that no-key path (above).
 - `images/test/install-safety.sh`: everything `inglenook-install` does before it erases: what it shows,
   the typed confirmation, bad sizes, a non-disk, and that the disk is byte-for-byte unchanged afterwards.
 
