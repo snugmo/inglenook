@@ -15,12 +15,15 @@
 # The two image variants differ in how a disk without a TPM is encrypted:
 # the tpm2 variant (the default) leaves the root unencrypted, and the no-tpm
 # variant makes it a LUKS2 volume with an empty key slot that unlocks
-# hands-off and can receive a FIDO2 token. /var is LUKS2 either way: sealed to
-# the machine's TPM when there is one, empty slot otherwise. On request the
-# installer also enrols a FIDO2 security key into the volumes' LUKS2 headers,
-# so the key unlocks them at boot alongside the TPM (or the empty key): /var
-# in both variants, the root on the no-tpm variant (the tpm2 variant's root
-# boots from the TPM only; docs/encryption.md).
+# hands-off. /var is LUKS2 either way: sealed to the machine's TPM when there
+# is one, empty slot otherwise. On request the installer also enrols a FIDO2
+# security key into the volumes' LUKS2 headers: each enrolment adds a new
+# keyslot and a token the key unlocks (docs/encryption.md), so an empty-key
+# volume becomes token-gated from the first boot on (a boot without the key
+# fails: the empty key is not tried after the token wait), while on a
+# TPM-sealed volume the TPM still unlocks first and the key is the fallback
+# for a lost TPM. Offered for /var in both variants, the root on the no-tpm
+# variant only (the tpm2 variant's root boots from the TPM only).
 #
 # Questions are skipped when their answer is in the environment (the tests do
 # that): INSTALL_DISK, INSTALL_ROOT_SIZE (50G), INSTALL_ENCRYPT (tpm2|none on
@@ -244,8 +247,14 @@ if [ -n "$fido2_what" ]; then
   if [ -z "${INSTALL_FIDO2:-}" ]; then
     printf '\n'
     printf 'A FIDO2 security key (a YubiKey ...) can unlock %s at boot.\n' "$fido2_what"
-    printf 'The key is added on top of what is already there (the TPM, or the empty key): nothing is\n'
-    printf 'replaced, and a boot without the key still boots.\n'
+    if [ "$var_encrypt" = key-file ]; then
+      printf 'The key is added on top of the empty key: nothing is replaced, but once enrolled a\n'
+      printf 'volume is token-gated: a boot without the key waits 30 s and fails (the empty key is\n'
+      printf 'not tried). Plan to have the key in hand from the first boot on.\n'
+    else
+      printf 'The key is added on top of the TPM seal: nothing is replaced, and a boot without the\n'
+      printf 'key still boots (the TPM unlocks first; the key is the fallback for a lost TPM).\n'
+    fi
     printf 'The installer then asks you to insert the key (set its PIN beforehand, if it has one).\n'
     yes_no "Enrol a FIDO2 security key to unlock $fido2_what?" n && INSTALL_FIDO2=1 || INSTALL_FIDO2=0
   fi
@@ -368,11 +377,15 @@ ROOTPART=/dev/disk/by-partlabel/root
 
 # The FIDO2 enrolment of step 5: the volumes exist now and are still closed, so the
 # key can be written into their LUKS2 JSON headers. Each volume gets one
-# systemd-fido2 token: it adds no keyslot (the TPM secret or the empty key keeps
-# working - the token is a second way to unlock, the old key stays the recovery
-# path), the volume key is fetched through the same method the volume is sealed
-# with (--unlock-tpm2-device=auto or --unlock-empty), and the key's PIN, when it
-# has one, is asked through ask-password on the console.
+# systemd-fido2 token and one new keyslot the token's secret unlocks (systemd 262
+# stores the volume key in that keyslot, keyed by a base64-encoded secret the key
+# alone can reconstruct): the existing keys (the TPM seal, or the empty key) are
+# untouched - the token is a second way to unlock, the old keys stay the recovery
+# path. Once a FIDO2 token is in the header, a boot without the key waits 30 s
+# for it and fails, unless another working key (the TPM) unlocks first; the
+# volume key is fetched through the same method the volume is sealed with
+# (--unlock-tpm2-device=auto or --unlock-empty), and the key's PIN, when it has
+# one, is asked through ask-password on the console.
 fido2_devices() { systemd-cryptenroll --fido2-device=list 2>/dev/null | grep '^/dev/hidraw' || true; }
 wait_for_fido2() {
   local n=0 reply
