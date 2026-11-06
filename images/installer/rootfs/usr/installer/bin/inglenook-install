@@ -284,7 +284,7 @@ udevadm settle
 # It must not be null: repart would then seed with a random id, and the
 # first-boot initrd (reading a not-yet-set /etc/machine-id) would derive
 # different UUIDs and refuse the existing layout.
-MACHINE_ID=$(uuidgen | tr -d '-' | tr 'A-F' 'a-f')
+MACHINE_ID=$(systemd-id128 new)
 say "Partitioning: ESP $ESP_SIZE, root ${root_gib}G${root_desc:+ ($root_desc)}, /var the rest ($([ "$var_encrypt" = tpm2 ] && echo 'XFS on LUKS2, sealed to the TPM' || echo 'XFS on LUKS2, empty key'))"
 rm -rf "$RUN/repart.d"; mkdir -p "$RUN/repart.d"
 cp "$IN"/repart.d/*.conf "$RUN/repart.d/"
