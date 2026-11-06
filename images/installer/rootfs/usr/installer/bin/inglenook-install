@@ -37,6 +37,10 @@ DEFAULT_ROOT=50G
 MIN_ROOT_GIB=8
 MIN_VAR_GIB=2
 mkdir -p "$RUN"
+# find_image's vfat mounts: step 7 unmounts them on the way through; an earlier
+# exit (a refusal, a crash) would leave them mounted, and they pile up when the
+# script is run again in the same initrd.
+trap 'for m in "$RUN"/src*; do [ -d "$m" ] && mountpoint -q "$m" 2>/dev/null && umount "$m" 2>/dev/null || true; done' EXIT
 
 say()  { printf '\n==> %s\n' "$*"; }
 warn() { printf '\nWARNING: %s\n' "$*" >&2; }
