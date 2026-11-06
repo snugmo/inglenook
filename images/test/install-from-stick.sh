@@ -13,7 +13,11 @@
 # variant - the tpm2 installer refuses it; none: plain root; /var is LUKS2 in
 # every case - the tpm2 seal when a TPM is attached, an empty key slot when
 # not. luks and none boot without a TPM, so the no-tpm case exercises the
-# variant's FIDO2/empty-slot root unlock drop-in, docs/encryption.md), RAM (installer VM memory, default 4G), KEY (ssh key to log into
+# variant's FIDO2/empty-slot root unlock drop-in, docs/encryption.md),
+# FIDO2=1 (answer the installer's FIDO2 question with 1; the installer VM has
+# no FIDO2 device, so this covers the no-key path: the installer polls briefly,
+# warns and continues, and the test checks that no token was enrolled),
+# RAM (installer VM memory, default 4G), KEY (ssh key to log into
 # the installed disk, default build/xfsvar/key; its public half is handed to
 # the VM, see vm.sh), STICK_REUSE=1 (keep the stick of the last run), WORK
 # (default build/install-from-stick), ROOT_SIZE (default 8G; the rest of the
@@ -91,7 +95,7 @@ bad() { echo "FAIL $1"; fail=1; }
 
 echo "installer VM: waiting for the shell"
 run 240 'echo 1 > /proc/sys/kernel/printk; for i in $(seq 60); do blkid -L INGLENOOK && break; sleep 1; done' >/dev/null
-run 20 "(INSTALL_DISK=/dev/vda INSTALL_ROOT_SIZE=${ROOT_SIZE:-8G} INSTALL_ENCRYPT=$ENCRYPT INSTALL_RECOVERY_KEY=0 INSTALL_USER=alice INSTALL_TOKEN=1 INSTALL_REALNAME='Alice Example' INSTALL_USER_PASSWORD='correct horse battery' INSTALL_YES=1 INSTALL_NO_REBOOT=1${INSTALL_DEBUG:+ INSTALL_DEBUG=1} setsid inglenook-install > /tmp/install.log 2>&1 &)" >/dev/null
+run 20 "(INSTALL_DISK=/dev/vda INSTALL_ROOT_SIZE=${ROOT_SIZE:-8G} INSTALL_ENCRYPT=$ENCRYPT INSTALL_RECOVERY_KEY=0 INSTALL_USER=alice INSTALL_TOKEN=1 INSTALL_REALNAME='Alice Example' INSTALL_USER_PASSWORD='correct horse battery' INSTALL_YES=1 INSTALL_NO_REBOOT=1${FIDO2:+ INSTALL_FIDO2=1}${INSTALL_DEBUG:+ INSTALL_DEBUG=1} setsid inglenook-install > /tmp/install.log 2>&1 &)" >/dev/null
 run 900 'until grep -q "no longer needed" /tmp/install.log; do sleep 1; if grep -q "^ERROR:" /tmp/install.log; then break; fi; done; grep -c "no longer needed" /tmp/install.log' | tail -1 | grep -q '^1' \
   && ok "the image was extracted from the stick" || bad "the install never got past the image extraction"
 
@@ -146,6 +150,16 @@ case "$ENCRYPT" in
     # no TPM is attached in this case, so the installer gave /var an empty key slot too
     check "the var volume has one key slot and no tokens (empty key)" 'cryptsetup luksDump /dev/disk/by-partlabel/var 2>/dev/null | grep -cE "^  [0-9]+: (luks2|systemd-tpm2)"' 1 ;;
 esac
+if [[ $FIDO2 == 1 ]]; then
+  # The installer VM has no FIDO2 device: the enrolment waited (a short poll
+  # under INSTALL_YES=1), warned, and continued without touching the volumes.
+  check "the installer warned and continued without a FIDO2 key" 'grep -c "No FIDO2 key present" phases.txt' 1
+  case "$ENCRYPT" in
+    tpm2|luks)
+      check "no FIDO2 token in the root (no key was enrolled)" 'cryptsetup luksDump /dev/disk/by-partlabel/root 2>/dev/null | grep -c systemd-fido2' 0 ;;
+  esac
+  check "no FIDO2 token in /var (no key was enrolled)" 'cryptsetup luksDump /dev/disk/by-partlabel/var 2>/dev/null | grep -c systemd-fido2' 0
+fi
 check "/var is the unlocked var volume" 'findmnt -rno SOURCE -t xfs /var' /dev/mapper/var
 check "/var is xfs" 'stat -f -c %T /var' xfs
 check "bootc knows the registry image" "bootc status --format=json | grep -o '\"image\":\"[^\"]*\"' | head -1" "\"image\":\"$ref\""
