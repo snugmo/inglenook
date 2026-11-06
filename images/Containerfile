@@ -200,9 +200,14 @@ RUN dnf -y install --allowerasing \
 # the updates repos' metalink already serves the release updates tree and
 # stays. The two gstreamer packages add the codecs the free plugins lack.
 # ffmpeg replaces ffmpeg-free and its libraries, and libavcodec-freeworld adds
-# the patent-encumbered codecs to them. --allowerasing stays on the ffmpeg
-# install: rpmfusion's ffmpeg-libs provides libswscale-free and conflicts with
-# the Fedora libswscale-free the base image installed.
+# the patent-encumbered codecs to them. The freeworld Mesa drivers (H.264/H.265
+# hardware decoding (VA-API) and the Vulkan video decode that the stock Mesa
+# builds lack) replace the stock mesa-va-drivers and mesa-vulkan-drivers, hence
+# --allowerasing and the spelled-out .x86_64 arch; they build against the
+# release Mesa (mesa-filesystem = 26.2.3), and a Fedora mesa update would need
+# them rebuilt by RPM Fusion before they install again. --allowerasing stays on
+# the ffmpeg install too: rpmfusion's ffmpeg-libs provides libswscale-free and
+# conflicts with the Fedora libswscale-free the base image installed.
 ADD --checksum=sha256:761100efc44f57e16dadec1780582f725028e212593740e955dbc7d5b2de81bb \
     https://download1.rpmfusion.org/free/fedora/releases/45/Everything/x86_64/os/Packages/r/rpmfusion-free-release-45-2.noarch.rpm \
     /tmp/rpmfusion-free-release.rpm
