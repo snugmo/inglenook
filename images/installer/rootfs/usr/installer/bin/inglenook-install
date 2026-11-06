@@ -88,7 +88,15 @@ printf '    checking the image against SHA256SUMS ...\n'
 TARGET_IMGREF=${INSTALL_TARGET_IMGREF:-$(cat "$IMG/target-imgref" 2>/dev/null || true)}
 [ -n "$TARGET_IMGREF" ] || die "No target image reference (set INSTALL_TARGET_IMGREF or provide $IMG/target-imgref)."
 printf '    updates will come from: %s\n' "$TARGET_IMGREF"
-IMG_BYTES=$(cat "$IMG"/image.oci.tar.* | wc -c)
+# The image is split in 1G parts for FAT32: the scratch size needs only their
+# sizes, and reading them to count the bytes (cat | wc -c) would pull the whole
+# image off the stick for nothing.
+IMG_BYTES=0
+for part in "$IMG"/image.oci.tar.*; do
+  [ -f "$part" ] || continue
+  IMG_BYTES=$(( IMG_BYTES + $(stat -c %s "$part") ))
+done
+[ "$IMG_BYTES" -gt 0 ] || die "No image data files under $IMG (expected image.oci.tar.*)."
 # the extracted layout plus bootc's temporary files: /var doubles as this scratch space,
 # so /var must be at least this big
 SCRATCH_GIB=$(( (IMG_BYTES * 3 / 2) / 1073741824 + 2 ))
