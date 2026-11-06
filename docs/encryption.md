@@ -90,12 +90,20 @@ options (a crypttab option since v246); (4) prompt the user.
 - **FIDO2 is opt-in**: it needs `fido2-device=auto` in the options. It is not
   auto-detected even when a token is plugged in and a FIDO2 token is enrolled in the
   LUKS header.
-- **The token gate is hard.** With `fido2-device=auto` and no token present it logs
-  "Security token not present for unlocking volume …, please plug it in", waits the
-  30-second token timeout, and the unit **fails** (ETIMEDOUT). It does not fall
-  through to a password prompt (only `-EAGAIN` from a token plugin does). Once a FIDO2
-  token is enrolled in a volume, a boot without the token is a hard failure — that is
-  the intended fail-closed behaviour, but it must be planned for.
+- **A missing token delays, it does not gate, while any other method exists.** With
+  `fido2-device=auto` and a `systemd-fido2` token in the header but no device, `attach`
+  logs "Security token not present for unlocking volume …, please plug it in", then
+  runs a 30-second udev monitor for the device; on timeout it logs "Timed out waiting
+  for security device, …" and returns `-EAGAIN`, which the attach loop treats as
+  "drop this method, try the next": the loop clears the token option and re-enters
+  the chain (the configured/discovered key, then the empty password when
+  `try-empty-password=true`, then an interactive prompt unless `headless`). Verified
+  on 262.1 with an empty-key volume and an enrolled token: a cold boot without the
+  key unlocks each volume ~30 s later (the two `module=crypt op=ctr` audit lines are
+  ~34 s apart) and reaches the login. So a volume with an enrolled token is
+  token-gated only when the token is its *sole* method — no empty keyslot, no TPM,
+  no prompt (e.g. after the other keyslots are wiped). `headless` only disables the
+  password/PIN prompts (ENOPKG); it does not skip the device monitor wait.
 - **TPM2 never blocks.** In v262 any form of TPM2 attach failure is mangled to a
   non-fatal `-EAGAIN` ("Mangle error code: let's make any form of TPM2 failure
   non-fatal", cryptsetup.c ~2010) — no chip, no TPM2 token, PIN failure — and the
@@ -219,7 +227,7 @@ volume:
 | --- | --- |
 | **fresh** (empty slot only, no token) | the FIDO2 plugin finds no `systemd-fido2` metadata → `-ENXIO`/`-ENOENT`/`-ENOTUNIQ` → converted to `-EAGAIN` (cryptsetup-token-systemd-fido2.c:130) and dropped immediately (the 30-second monitor only starts when a token *is* in the header) → `try-empty-password` unlocks. Hands-off. |
 | **enrolled, token present** | the plugin unlocks the volume key; the PIN comes through ask-password (the `cryptsetup.fido2-pin` credential, or the plymouth prompt). |
-| **enrolled, token absent** | the plugin's device enumeration finds nothing (`FIDO_ERR_INTERNAL` → synthetic `-EAGAIN`) → the 30-second udev monitor → the unit fails. Fail-closed, the intended behaviour. |
+| **enrolled, token absent** | the plugin's device enumeration finds nothing (`FIDO_ERR_INTERNAL` → synthetic `-EAGAIN`) → the 30-second udev monitor for the device → on timeout `-EAGAIN` again → the attach loop drops the token method and `try-empty-password` unlocks with the empty key. The boot is ~30 s slower per volume, not failed; the volume is token-gated only once the empty keyslot is wiped. |
 | **unencrypted install from this image** | no `crypto_LUKS` partition → gpt-auto generates no cryptsetup unit → the drop-in (with no fragment to attach to) is inert. |
 
 A TPM machine running the no-TPM variant boots fine, but its volume key is
@@ -252,10 +260,12 @@ token (see the LUKS2 facts); the existing keys (the TPM seal, the empty key) are
 untouched, so the state after such an install is "enrolled, token present (or
 absent at boot)" in the matrix above, never "fresh". At boot, a TPM-sealed volume
 still unlocks from the TPM first, so the key there is the fallback for a lost
-TPM; a volume with only the empty key is token-gated from the first boot on — a
-boot without the key fails after the 30-second token wait, and the empty key is
-not tried after it (the no-TPM image always; /var on the tpm2 image when there is
-no TPM). The tpm2 variant's TPM-sealed *root* is not offered: the unit gpt-auto
+TPM; a volume with only the empty key (the no-TPM image; /var on the tpm2 image
+when there is no TPM) boots without the key too, ~30 s slower per volume: the
+token wait times out and the empty key unlocks, so the key is a fast path rather
+than a gate. A volume becomes token-gated only when the token is its sole
+method (the other keyslots wiped, below). The tpm2 variant's TPM-sealed *root*
+is not offered: the unit gpt-auto
 generates for it carries no FIDO2 option (a static drop-in cannot add one safely),
 so an enrolled token would never be tried there.
 

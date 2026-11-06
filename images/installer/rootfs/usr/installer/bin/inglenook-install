@@ -18,12 +18,14 @@
 # hands-off. /var is LUKS2 either way: sealed to the machine's TPM when there
 # is one, empty slot otherwise. On request the installer also enrols a FIDO2
 # security key into the volumes' LUKS2 headers: each enrolment adds a new
-# keyslot and a token the key unlocks (docs/encryption.md), so an empty-key
-# volume becomes token-gated from the first boot on (a boot without the key
-# fails: the empty key is not tried after the token wait), while on a
-# TPM-sealed volume the TPM still unlocks first and the key is the fallback
-# for a lost TPM. Offered for /var in both variants, the root on the no-tpm
-# variant only (the tpm2 variant's root boots from the TPM only).
+# keyslot and a token the key unlocks (docs/encryption.md); the existing keys
+# (the TPM seal, or the empty key) are untouched and keep working. At boot
+# the token unlocks the volume when the key is in hand; without the key the
+# boot waits up to 30 s for the key and then falls back to the other keys, so
+# the key never locks a volume out on its own - a volume is token-gated only
+# once its other keyslots are wiped. Offered for /var in both variants, the
+# root on the no-tpm variant only (the tpm2 variant's root boots from the
+# TPM only).
 #
 # Questions are skipped when their answer is in the environment (the tests do
 # that): INSTALL_DISK, INSTALL_ROOT_SIZE (50G), INSTALL_ENCRYPT (tpm2|none on
@@ -248,9 +250,10 @@ if [ -n "$fido2_what" ]; then
     printf '\n'
     printf 'A FIDO2 security key (a YubiKey ...) can unlock %s at boot.\n' "$fido2_what"
     if [ "$var_encrypt" = key-file ]; then
-      printf 'The key is added on top of the empty key: nothing is replaced, but once enrolled a\n'
-      printf 'volume is token-gated: a boot without the key waits 30 s and fails (the empty key is\n'
-      printf 'not tried). Plan to have the key in hand from the first boot on.\n'
+      printf 'The key is added on top of the empty key: nothing is replaced. With the key in hand\n'
+      printf 'the volume unlocks from it; without it, the boot waits up to 30 s for the key and then\n'
+      printf 'unlocks with the empty key, so the key never locks you out - it just makes the boot\n'
+      printf 'faster (the volume becomes token-only if its empty keyslot is wiped later).\n'
     else
       printf 'The key is added on top of the TPM seal: nothing is replaced, and a boot without the\n'
       printf 'key still boots (the TPM unlocks first; the key is the fallback for a lost TPM).\n'
@@ -570,13 +573,13 @@ if [ -n "${FIDO2_ENROLLED:-}" ]; then
   printf '\n  A FIDO2 security key now unlocks %s at boot: insert (and touch) the key when\n' "$fido2_what"
   printf '  the boot asks for it; if it has a PIN, the boot asks for that too.\n'
   if [ "$root_encrypt" = key-file ]; then
-    printf '  The root and /var volumes are now token-gated: with a token in the header, a\n'
-    printf '  boot without the key waits 30 s and fails (the empty key is not tried after\n'
-    printf '  the token wait). Keep the key with you from the first boot on.\n'
+    printf '  The empty key both volumes were installed with still works: a boot without the key\n'
+    printf '  waits up to 30 s for the key per volume, then unlocks hands-off. The key is a fast\n'
+    printf '  path, not a gate - a volume becomes token-only if its empty keyslot is wiped.\n'
   elif [ "$var_encrypt" = key-file ]; then
-    printf '  The /var volume is now token-gated: with a token in the header, a boot without\n'
-    printf '  the key waits 30 s and fails (the empty key is not tried after the token wait).\n'
-    printf '  Keep the key with you from the first boot on.\n'
+    printf '  The empty key /var was installed with still works: a boot without the key waits up\n'
+    printf '  to 30 s for the key, then unlocks hands-off. The key is a fast path, not a gate -\n'
+    printf '  the volume becomes token-only if its empty keyslot is wiped.\n'
   else
     printf '  The TPM the volumes are sealed with still unlocks first, so a boot without the\n'
     printf '  key still boots; the key is the fallback for a lost TPM.\n'

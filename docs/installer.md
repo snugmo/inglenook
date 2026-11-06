@@ -176,12 +176,12 @@ key, keyed by a base64-encoded value only the key can reconstruct — the
 mechanism all LUKS2 tokens use, docs/encryption.md): the existing keys (the
 TPM seal, or the empty key) are untouched and keep working. What that means at
 boot depends on how the volume was sealed: a TPM-sealed /var still unlocks from
-the TPM first, so a boot without the key still boots (the key is the fallback
-for a lost TPM); a volume with only the empty key — the no-tpm image, or /var
-on the tpm2 image when there is no TPM — is token-gated from then on: a boot
-without the key waits the initrd's 30-second token timeout and fails, and the
-empty key is not tried after that (docs/encryption.md) — so the key must be in
-hand from the first boot on. To
+the TPM first, so a boot without the key still boots, with no delay (the key is
+the fallback for a lost TPM); a volume with only the empty key — the no-tpm
+image, or /var on the tpm2 image when there is no TPM — boots without the key
+too: the initrd waits up to 30 s for the key per volume, the wait times out,
+and the empty key unlocks (docs/encryption.md), so the key is a fast path
+rather than a gate. To
 make the key the *only* way to unlock a volume later, wipe the other keyslots
 from the booted system (docs/encryption.md). `INSTALL_FIDO2=1|0` answers the
 question; with `1` and no key in hand the installer warns and continues without
@@ -206,9 +206,11 @@ it.
 - `images/test/install-fido2.sh`: the FIDO2 key on the LUKS volumes, end to end: boot a
   disk installed by install-from-stick, enrol a software FIDO2 token (softfido.py in the
   booted system) into the volumes' LUKS2 headers, and reboot without the token: on the
-  no-tpm image (`ENCRYPT=luks`) the empty-key volumes are token-gated and the boot never
-  reaches a login; on the tpm2 image (`ENCRYPT=tpm2`) the TPM unlocks /var before the
-  token is tried, so the boot succeeds (the key is the fallback). The installer's own
+  no-tpm image (`ENCRYPT=luks`) the boot still reaches a login — the initrd waits ~30 s
+  for the key per volume, the wait times out, and the empty key unlocks (the test
+  checks the gap between the two unlock audit lines); on the tpm2 image
+  (`ENCRYPT=tpm2`) the TPM unlocks /var before the token is tried, so the boot
+  succeeds with no delay (the key is the fallback). The installer's own
   enrolment (the volumes still closed in the initrd) needs a FIDO2 device in the initrd,
   which has no python3, so it is covered only through that no-key path (above).
 - `images/test/install-safety.sh`: everything `inglenook-install` does before it erases: what it shows,
