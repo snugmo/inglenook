@@ -150,7 +150,7 @@ case "$ENCRYPT" in
     # no TPM is attached in this case, so the installer gave /var an empty key slot too
     check "the var volume has one key slot and no tokens (empty key)" 'cryptsetup luksDump /dev/disk/by-partlabel/var 2>/dev/null | grep -cE "^  [0-9]+: (luks2|systemd-tpm2)"' 1 ;;
 esac
-if [[ $FIDO2 == 1 ]]; then
+if [[ ${FIDO2:-0} == 1 ]]; then
   # The installer VM has no FIDO2 device: the enrolment waited (a short poll
   # under INSTALL_YES=1), warned, and continued without touching the volumes.
   # (phases.txt is local, not on the installed disk: a plain grep, not check.)
