@@ -12,6 +12,16 @@
 ; key is ignored. Found with a permissive sshd_session_t: these three, nothing
 ; else. Works for root only: the credential directory is root-only, so sshd,
 ; which reads it as the target user, cannot use it for other accounts.
+; systemd-tmpfiles restores /etc/shadow and /etc/gshadow from the factory
+; snapshot (the C! rules in inglenook-etc-factory.conf): it stats the source
+; and the destination on every boot, and copies them if they are missing.
+; The stock policy (45.23) gives domains no file permission on shadow_t
+; beyond the generic mmap, which makes that stat fail; and without the
+; shadow files NSS has no shadow source, so PAM fails for system accounts
+; such as sddm. The full set is safe here: the source is the image's own
+; factory copy, the destination is /etc.
+(allow systemd_tmpfiles_t shadow_t (file (create getattr open read relabelfrom relabelto write)))
+
 (allow sshd_session_t init_var_run_t (file (getattr open read)))
 
 ; systemd-homework (the helper systemd-homed spawns to create, mount and
