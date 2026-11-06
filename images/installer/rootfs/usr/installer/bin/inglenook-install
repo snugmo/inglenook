@@ -51,11 +51,11 @@ ask() {
 yes_no() { # yes_no "question" default(y|n): 0 for yes
   local reply def=$2
   [ -n "${INSTALL_YES:-}" ] && return 0
-  read -r -p "$1 [$( [ "$def" = y ] && echo Y/n || echo y/N )]: " reply || die "no answer (end of input)"
+  read -r -p "$1 [$( [ "$def" = y ] && printf 'Y/n\n' || printf 'y/N\n' )]: " reply || die "no answer (end of input)"
   reply=${reply:-$def}
   [[ $reply == [Yy]* ]]
 }
-gib() { echo $(( $1 / 1073741824 )); }
+gib() { printf '%d\n' "$(( $1 / 1073741824 ))"; }
 
 [ "$(id -u)" = 0 ] || die "run as root"
 
@@ -81,13 +81,13 @@ say "Looking for the Inglenook image (a vfat volume with /inglenook/image.oci.ta
 for _ in $(seq 30); do find_image && break; sleep 1; done
 [ -n "${SRC:-}" ] || die "No Inglenook image found. Plug in the installer stick, or a FAT32 drive holding /inglenook/."
 IMG=$SRC/inglenook
-echo "    found on ${SRCDEV:-$SRC}"
+printf '    found on %s\n' "${SRCDEV:-$SRC}"
 [ -f "$IMG/SHA256SUMS" ] || die "$IMG/SHA256SUMS is missing; refusing to install an unverified image."
-echo "    checking the image against SHA256SUMS ..."
+printf '    checking the image against SHA256SUMS ...\n'
 (cd "$IMG" && sha256sum --quiet -c SHA256SUMS) || die "The image does not match SHA256SUMS: a damaged copy? Not installing."
 TARGET_IMGREF=${INSTALL_TARGET_IMGREF:-$(cat "$IMG/target-imgref" 2>/dev/null || true)}
 [ -n "$TARGET_IMGREF" ] || die "No target image reference (set INSTALL_TARGET_IMGREF or provide $IMG/target-imgref)."
-echo "    updates will come from: $TARGET_IMGREF"
+printf '    updates will come from: %s\n' "$TARGET_IMGREF"
 IMG_BYTES=$(cat "$IMG"/image.oci.tar.* | wc -c)
 # the extracted layout plus bootc's temporary files: /var doubles as this scratch space,
 # so /var must be at least this big
@@ -101,7 +101,7 @@ if [ -z "${INSTALL_DISK:-}" ]; then
   mapfile -t disks < <(lsblk -dpno PATH,TYPE,RO | awk '$2 == "disk" && $3 == 0 { print $1 }' | grep -vE '^/dev/(zram|loop|ram)' | grep -vxF "${SRC_DISK:-none}" || true)
   [ ${#disks[@]} -gt 0 ] || die "No disk to install to (the installer stick is excluded)."
   i=0; for d in "${disks[@]}"; do i=$((i+1)); printf '  %d) %s\n' "$i" "$(lsblk -dno PATH,SIZE,TRAN,MODEL "$d")"; done
-  ask INSTALL_DISK "Install to which disk? (number or /dev/... path)" "$([ ${#disks[@]} = 1 ] && echo 1)"
+  ask INSTALL_DISK "Install to which disk? (number or /dev/... path)" "$([ ${#disks[@]} = 1 ] && printf '1\n')"
   if [[ $INSTALL_DISK =~ ^[0-9]+$ ]]; then INSTALL_DISK=${disks[$((INSTALL_DISK-1))]:-}; fi
 fi
 DISK=$INSTALL_DISK
@@ -117,14 +117,14 @@ parts=$(lsblk -rno TYPE "$DISK" | grep -c '^part' || true)
 sigs=$(wipefs -n "$DISK" 2>/dev/null | tail -n +2 || true)
 fstypes=$(lsblk -rno FSTYPE "$DISK" | sort -u | grep . | tr '\n' ' ' || true)
 if [ "$parts" = 0 ] && [ -z "$sigs" ] && [ -z "$fstypes" ]; then
-  echo "    The disk looks empty."
+  printf '    The disk looks empty.\n'
   EMPTY=1
 else
   EMPTY=0
-  echo "    $parts partition(s); filesystems and signatures: ${fstypes:-none}"
-  case " $fstypes " in *" ntfs "*|*" BitLocker "*) echo "    -> looks like Windows data";; esac
-  case " $fstypes " in *" crypto_LUKS "*) echo "    -> contains LUKS-encrypted volumes (an encrypted Linux install?)";; esac
-  lsblk -rno PARTLABEL "$DISK" | grep -qx root && echo "    -> has a partition labeled 'root': possibly an earlier Inglenook install"
+  printf '    %s partition(s); filesystems and signatures: %s\n' "$parts" "${fstypes:-none}"
+  case " $fstypes " in *" ntfs "*|*" BitLocker "*) printf '    -> looks like Windows data\n';; esac
+  case " $fstypes " in *" crypto_LUKS "*) printf '    -> contains LUKS-encrypted volumes (an encrypted Linux install?)\n';; esac
+  lsblk -rno PARTLABEL "$DISK" | grep -qx root && printf "    -> has a partition labeled 'root': possibly an earlier Inglenook install\n"
 fi
 printf '\n  *** EVERYTHING ON %s WILL BE ERASED. This cannot be undone. ***\n' "$DISK"
 if [ "$EMPTY" = 1 ]; then
@@ -146,9 +146,9 @@ max_root_gib=$(( $(gib "$DISK_BYTES") - esp_gib - var_min_gib - 1 ))
 [ "$max_root_gib" -ge "$MIN_ROOT_GIB" ] || die "$DISK is too small: it needs about $((MIN_ROOT_GIB + esp_gib + var_min_gib + 1)) GiB."
 def_root=$DEFAULT_ROOT
 [ "$(numfmt --from=iec --to-unit=1073741824 "$def_root")" -le "$max_root_gib" ] || def_root=${max_root_gib}G
-echo
-echo "The root filesystem holds the system image and its state. Everything else on the disk"
-echo "becomes /var (XFS on an encrypted volume, created now); $max_root_gib GiB is the most the root can have here."
+printf '\n'
+printf 'The root filesystem holds the system image and its state. Everything else on the disk\n'
+printf 'becomes /var (XFS on an encrypted volume, created now); %s GiB is the most the root can have here.\n' "$max_root_gib"
 ask INSTALL_ROOT_SIZE "Size of the root" "$def_root"
 ROOT_BYTES=$(numfmt --from=iec "$INSTALL_ROOT_SIZE" 2>/dev/null) || die "'$INSTALL_ROOT_SIZE' is not a size (examples: 50G, 64G)."
 root_gib=$(gib "$ROOT_BYTES")
@@ -160,7 +160,7 @@ if [ -z "${INSTALL_ENCRYPT:-}" ]; then
     # This image is built to boot without a TPM: the root is a LUKS2 volume with an
     # empty key (a FIDO2 token or a recovery key can be enrolled later), never
     # sealed to the TPM even when there is one.
-    [ -c /dev/tpmrm0 ] && echo "    This is the no-TPM image: a TPM, if there is one, is not used. Use the tpm2 image for a TPM-sealed disk."
+    [ -c /dev/tpmrm0 ] && printf '    This is the no-TPM image: a TPM, if there is one, is not used. Use the tpm2 image for a TPM-sealed disk.\n'
     INSTALL_ENCRYPT=luks
   elif [ -c /dev/tpmrm0 ]; then
     yes_no "Encrypt the disk, unlocked by this machine's TPM (recommended)?" y && INSTALL_ENCRYPT=tpm2 || INSTALL_ENCRYPT=none
@@ -188,7 +188,7 @@ case "$INSTALL_ENCRYPT" in
     root_encrypt=
     [ -c /dev/tpmrm0 ] && var_encrypt=tpm2 || var_encrypt=key-file
     ;;
-  *) die "'$INSTALL_ENCRYPT' is not an encryption mode ($([ "$VARIANT" = tpm2 ] && echo 'tpm2, none' || echo 'luks, none'))." ;;
+  *) die "'$INSTALL_ENCRYPT' is not an encryption mode ($([ "$VARIANT" = tpm2 ] && printf 'tpm2, none\n' || printf 'luks, none\n'))." ;;
 esac
 if [ -n "$root_encrypt" ]; then
   case $root_encrypt in
@@ -207,12 +207,12 @@ if [ -z "${INSTALL_NO_USER:-}" ]; then
   if [ -z "${INSTALL_USER:-}" ] && [ -n "${INSTALL_YES:-}" ]; then
     warn "No INSTALL_USER given: the first boot will ask for the first user on the console."
   elif [ -z "${INSTALL_USER:-}" ]; then
-    echo
-    echo "Nobody can log in to the new system yet: root is locked and there is no other account."
+    printf '\n'
+    printf 'Nobody can log in to the new system yet: root is locked and there is no other account.\n'
     if yes_no "Create the first user (a systemd-homed account that may use run0) now?" y; then
       ask INSTALL_USER "Username"
     else
-      echo "    Skipped: the first boot will ask for it on the console (systemd-homed-firstboot)."
+      printf '    Skipped: the first boot will ask for it on the console (systemd-homed-firstboot).\n'
     fi
   fi
   if [ -n "${INSTALL_USER:-}" ]; then
@@ -228,19 +228,19 @@ if [ -z "${INSTALL_NO_USER:-}" ]; then
     FIRST_REAL=${INSTALL_REALNAME:-}
     FIRST_PW=${INSTALL_USER_PASSWORD:-}
     while [ -z "$FIRST_PW" ]; do
-      read -rsp "Password for $FIRST_USER: " FIRST_PW || die "no answer (end of input)"; echo
-      read -rsp "Password again: " pw2 || die "no answer (end of input)"; echo
+      read -rsp "Password for $FIRST_USER: " FIRST_PW || die "no answer (end of input)"; printf '\n'
+      read -rsp "Password again: " pw2 || die "no answer (end of input)"; printf '\n'
       if [ "$FIRST_PW" != "$pw2" ] || [ "${#FIRST_PW}" -lt 8 ]; then
-        echo "    The two differ, or are shorter than 8 characters. Try again."; FIRST_PW=
+        printf '    The two differ, or are shorter than 8 characters. Try again.\n'; FIRST_PW=
       fi
     done
     FIRST_TOKEN=0
     if [ -n "${INSTALL_TOKEN:-}" ]; then FIRST_TOKEN=$INSTALL_TOKEN
     elif [ -z "${INSTALL_YES:-}" ]; then
-      echo
-      echo "A FIDO2 security key (YubiKey ...) can unlock $FIRST_USER's account instead of the password."
-      echo "The first boot then asks you to insert it and to enter its PIN (set one beforehand);"
-      echo "the password keeps working too."
+      printf '\n'
+      printf "A FIDO2 security key (YubiKey ...) can unlock %s's account instead of the password.\n" "$FIRST_USER"
+      printf 'The first boot then asks you to insert it and to enter its PIN (set one beforehand);\n'
+      printf 'the password keeps working too.\n'
       yes_no "Enrol a security key for $FIRST_USER at the first boot?" n && FIRST_TOKEN=1
     fi
   fi
@@ -263,7 +263,7 @@ if [ -f "$SRC/loader/addons/serial-console.addon.efi" ]; then
     yes_no "Give the installed system a serial console (a UKI addon on its ESP; useful for headless machines)?" n && INSTALL_CONSOLE=1 || INSTALL_CONSOLE=0
   fi
   if [ "${INSTALL_CONSOLE:-0}" = 1 ] && [ -z "${INSTALL_YES:-}" ]; then
-    echo "    The addon adds 'console=tty0 console=ttyS0,115200n8' to the kernel command line; remove loader/addons/serial-console.addon.efi from the ESP to turn it off."
+    printf "    The addon adds 'console=tty0 console=ttyS0,115200n8' to the kernel command line; remove loader/addons/serial-console.addon.efi from the ESP to turn it off.\n"
   fi
 else
   [ -z "${INSTALL_CONSOLE:-}" ] || warn "INSTALL_CONSOLE is set, but this stick has no serial-console addon (an older stick?): the installed system will have no serial console."
@@ -285,7 +285,7 @@ udevadm settle
 # first-boot initrd (reading a not-yet-set /etc/machine-id) would derive
 # different UUIDs and refuse the existing layout.
 MACHINE_ID=$(systemd-id128 new)
-say "Partitioning: ESP $ESP_SIZE, root ${root_gib}G${root_desc:+ ($root_desc)}, /var the rest ($([ "$var_encrypt" = tpm2 ] && echo 'XFS on LUKS2, sealed to the TPM' || echo 'XFS on LUKS2, empty key'))"
+say "Partitioning: ESP $ESP_SIZE, root ${root_gib}G${root_desc:+ ($root_desc)}, /var the rest ($([ "$var_encrypt" = tpm2 ] && printf 'XFS on LUKS2, sealed to the TPM\n' || printf 'XFS on LUKS2, empty key\n'))"
 rm -rf "$RUN/repart.d"; mkdir -p "$RUN/repart.d"
 cp "$IN"/repart.d/*.conf "$RUN/repart.d/"
 # The committed definitions carry the shape of the partitions; systemd-repart's config
@@ -377,7 +377,7 @@ mount -o remount,rw /target/boot
 if [ "${INSTALL_CONSOLE:-0}" = 1 ]; then
   mkdir -p /target/boot/loader/addons
   cp "$RUN/serial-console.addon.efi" /target/boot/loader/addons/
-  echo "    serial console: on the installed ESP (loader/addons/serial-console.addon.efi)"
+  printf '    serial console: on the installed ESP (loader/addons/serial-console.addon.efi)\n'
 fi
 
 # The machine id of the new system: the same one that seeded the partition
@@ -422,9 +422,9 @@ if [ -n "$FIRST_USER" ]; then
   # label them like the initrd's etc-restore does: strip the deployment prefix so the path matches /etc/...
   setfiles -m -F -r "$DEPLOY" -c "$DEPLOY"/etc/selinux/targeted/policy/policy.* \
     "$DEPLOY/etc/selinux/targeted/contexts/files/file_contexts" "$DEPLOY/etc/machine-id" "$DEPLOY/etc/credstore" "$DEPLOY/etc/subuid" "$DEPLOY/etc/subgid" \
-    $([ -d "$DEPLOY/etc/inglenook" ] && echo "$DEPLOY/etc/inglenook") \
+    $([ -d "$DEPLOY/etc/inglenook" ] && printf '%s\n' "$DEPLOY/etc/inglenook") \
     || warn "Could not label the credential; the first boot may log SELinux denials."
-  echo "    credential: $(ls -ldZ "$DEPLOY/etc/credstore/home.create.$FIRST_USER" | cut -c1-120)"
+  printf '    credential: %s\n' "$(ls -ldZ "$DEPLOY/etc/credstore/home.create.$FIRST_USER" | cut -c1-120)"
   [ -n "$root_encrypt" ] || warn "The disk is not encrypted: the password sits in /etc/credstore until the first boot deletes it."
 fi
 if [ -d /sys/firmware/efi/efivars ] && command -v efibootmgr >/dev/null; then
@@ -447,23 +447,23 @@ say "Installation complete."
 if [ -n "$RECOVERY" ]; then
   printf '\n  RECOVERY KEY for the encrypted root: %s\n  Keep it somewhere safe and off this machine.\n' "$RECOVERY"
 fi
-echo
+printf '\n'
 if [ -n "$FIRST_USER" ]; then
-  echo "  Log in as '$FIRST_USER' after the first boot; use run0 for administrative tasks."
+  printf "  Log in as '%s' after the first boot; use run0 for administrative tasks.\n" "$FIRST_USER"
 else
-  echo "  The first boot asks for the first user on the console; without one nobody can log in."
+  printf '  The first boot asks for the first user on the console; without one nobody can log in.\n'
 fi
 if [ "${INSTALL_CONSOLE:-0}" = 1 ]; then
-  echo "  The system has a serial console (the ESP's loader/addons/serial-console.addon.efi);"
-  echo "  delete that file to turn it off again."
+  printf "  The system has a serial console (the ESP's loader/addons/serial-console.addon.efi);\n"
+  printf '  delete that file to turn it off again.\n'
 fi
 if [ "$var_encrypt" = tpm2 ]; then
-  echo "  To add a recovery key or a FIDO2 token for the /var volume later, use"
-  echo "  systemd-cryptenroll (run0) on /dev/disk/by-partlabel/var."
+  printf '  To add a recovery key or a FIDO2 token for the /var volume later, use\n'
+  printf '  systemd-cryptenroll (run0) on /dev/disk/by-partlabel/var.\n'
 elif [ "$var_encrypt" = key-file ]; then
-  echo "  The /var volume has an empty key and unlocks hands-off. To make it need a"
-  echo "  FIDO2 token (or a recovery key) instead, enrol one later with systemd-cryptenroll"
-  echo "  (run0) on /dev/disk/by-partlabel/var."
+  printf '  The /var volume has an empty key and unlocks hands-off. To make it need a\n'
+  printf '  FIDO2 token (or a recovery key) instead, enrol one later with systemd-cryptenroll\n'
+  printf '  (run0) on /dev/disk/by-partlabel/var.\n'
 fi
 if [ -z "${INSTALL_NO_REBOOT:-}" ]; then
   while [ -n "$SRC_DISK" ] && [ -b "$SRC_DISK" ]; do
