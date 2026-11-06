@@ -100,8 +100,16 @@ done
 # the extracted layout plus bootc's temporary files: /var doubles as this scratch space,
 # so /var must be at least this big
 SCRATCH_GIB=$(( (IMG_BYTES * 3 / 2) / 1073741824 + 2 ))
+# The disk the image is read from: the parent of the vfat volume, or the
+# volume itself when it has no partition table (a raw FAT32 drive, which
+# stick.sh writes with PTYPE=none). Without it the stick exclusion below
+# would be blind.
 SRC_DISK=
-[ -n "${SRCDEV:-}" ] && SRC_DISK=/dev/$(lsblk -no PKNAME "$SRCDEV" | head -1)
+if [ -n "${SRCDEV:-}" ]; then
+  src_parent=$(lsblk -no PKNAME "$SRCDEV" | head -1)
+  [ -n "$src_parent" ] || src_parent=${SRCDEV#/dev/}
+  SRC_DISK=/dev/$src_parent
+fi
 
 # --- 2. The disk -----------------------------------------------------------------
 if [ -z "${INSTALL_DISK:-}" ]; then
