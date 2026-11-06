@@ -77,14 +77,15 @@ check "systemd sees the FIDO2 token" 'systemd-cryptenroll --fido2-device=list | 
 # same way the volume was sealed (the TPM2 token, or the empty keyslot - no
 # interactive prompt, unlike the default, which asks for a passphrase), and
 # adds one keyslot (the volume key, keyed by the token's secret) plus one
-# systemd-fido2 token to the 1 MiB header. --fido2-with-client-pin=no: the
-# software token has no PIN (systemd 262 defaults to one, and the enrolment
-# would fail against a token without); user presence stays required and
-# softfido grants it automatically.
+# systemd-fido2 token to the 1 MiB header. The default flags (like the
+# installer's): the software token has no PIN, so the enrolment disables the
+# PIN and records fido2-clientPin-required=false in the token (a key with a
+# PIN would be asked for it, through ask-password); user presence stays
+# required and softfido grants it automatically.
 VOLS=
 [[ $ENCRYPT == luks ]] && VOLS="root var" || VOLS="var"
 for v in $VOLS; do
-  g "timeout 120 systemd-cryptenroll --fido2-device=auto --fido2-with-client-pin=no --unlock-headless /dev/disk/by-partlabel/$v"
+  g "timeout 120 systemd-cryptenroll --fido2-device=auto --unlock-headless /dev/disk/by-partlabel/$v"
 done
 for v in $VOLS; do
   check "the $v volume got a systemd-fido2 token" "cryptsetup luksDump /dev/disk/by-partlabel/$v 2>/dev/null | grep -c systemd-fido2" 1
