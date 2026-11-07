@@ -85,6 +85,25 @@ docs/            # On-demand reference docs — read when relevant (see below)
 - The UKI's PCR 11 prediction is signed (`.pcrsig`, `.pcrpkey`) with a test key `dev-keys/pcr-{private,public}.pem` that `build.sh` makes with `ukify genkey` when missing (`PCR_PRIVATE_KEY`/`PCR_PUBLIC_KEY` override; gitignored, never commit). The private key reaches the UKI stage only as the build secret `pcrkey`; the public key is the UKI's `.pcrpkey`, which systemd-stub's tmpfiles rule copies to `/run/systemd/tpm2-pcr-public-key.pem`, where systemd 262 `systemd-tpm2-setup` looks for it to create the NvPCRs. **Do not install it under `/usr/lib/systemd` or `/etc/systemd`**: `systemd-cryptenroll` (bootc's `--block-setup tpm2-luks`) then binds the key to the signed PCR 11 and needs the signature to open the device, which the installer VM (no UKI) does not have ("Failed to load PCR signature"). The same key is in `/run/systemd` inside the booted UKI's initrd, where `systemd-repart` would bind the new `/var` (and the installer's root) to the signed PCR 11 too, and the unmeasured test VM then cannot unlock it on the next boot: `inglenook-var-repart.service` and the installer pass `--tpm2-public-key-pcrs=` (empty; `--tpm2-public-key=` does not turn it off in repart, although it does in `systemd-cryptenroll`) to keep the TPM keys PCR-less until the PCR policy is designed (without it `systemd-tpm2-setup-early` and the `systemd-pcrproduct`/`pcrlogin@` units fail with ENOENT on a measured boot; the test VM is not measured, so only real hardware shows it). The UKI must also be built with `ukify --sign-initrd-pcrs`: systemd 262 creates the NvPCRs with a write policy that only a signature bound to the `enter-initrd` phase with the policy reference `initrd` satisfies, and without that extra signature every NvPCR initialisation fails with `Couldn't find signature for this PCR bank, PCR index and public key` (surfacing as `Device not a stream`; the `NV_DefineSpace` `0x14c` lines (`TPM_RC_NV_DEFINED`) next to it are the harmless "index exists, reuse it" path, so a TPM clear is not needed). A key per release, kept outside the repo, is still to be decided.
 - Environment: `SSH_PUBKEY` (baked-in login key), `KARGS` (UKI kernel command line), `FEDORA_VERSION`, `DEV_REGISTRY`. The pipeline is `pre` target → mkosi initrd → `base` target → composefs digest → final image with the UKI (see Gotchas 6-8).
 
+### Shell Scripts
+
+- Target **POSIX sh** in new scripts: `/bin/sh` shebang, no bashisms — bash only where a feature actually needs it (`[[ ]]`, arrays, process substitution). The existing test and build scripts are bash on purpose (`token/answerer.sh` and `token/nopw.sh` are the `/bin/sh` examples); don't rewrite them, and `inglenook-install` must stay bash (`set -E`, arrays).
+- `set -euo pipefail` in bash scripts (the installer adds `-E` with an ERR trap); a failing `cd` gets `|| exit`.
+- Quote words that carry glob or comma characters (QEMU argument values, the RHS of `[[ == ]]`); remote commands passed to ssh/serial stay single-quoted so they expand on the machine, not locally.
+- Run `shellcheck` before committing; a `# shellcheck disable=<code>` needs a reason comment (the one standing exception: the space-separated `AVC_BASELINE_EXTRA`).
+
+### Security
+
+- Never put secrets (API keys, tokens, passwords) in committed files, logs, or commit messages.
+
+### Machine Config
+
+- Do not modify live configuration outside this repo (agent configs under `~/.config`, shell rc files, …) unless explicitly asked.
+
+### Context Hygiene
+
+- Keep this file short: hard rules plus pointers; long-form playbooks live in `docs/` and are read on demand.
+
 ## Gotchas
 
 1. **The bootc stage is mandatory**: `bootc install` only works on images with a bootc stage (the `containers.bootc` label + bootc tooling, i.e. an ostree commit as the base layer). Our base is bootc-ified and the stage persists through added layers — but don't base a stage on a non-bootc image without a `switch-to-bootc-container` step, and never override the bootc labels.
