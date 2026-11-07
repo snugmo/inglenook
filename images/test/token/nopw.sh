@@ -1,7 +1,7 @@
 #!/bin/sh
 # nopw.sh USER: drop the password hash from a homed user's record, keeping the tokens.
 # Works for directory homes (record in the home) and LUKS homes (record in /var/lib/systemd/home).
-cd /var/tmp
+cd /var/tmp || exit
 python3 - "$1" <<PY
 import json,os,sys,time
 u=sys.argv[1]

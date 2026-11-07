@@ -66,8 +66,8 @@ tpm_start() {
   "$swtpm" socket --tpm2 --tpmstate dir=tpm --ctrl type=unixio,path=tpm.sock \
     --flags startup-clear --terminate --daemon 2>/dev/null
   for _ in $(seq 20); do [[ -S tpm.sock ]] && break; sleep 0.2; done
-  qemu_tpm=(-chardev socket,id=chrtpm,path=tpm.sock -tpmdev emulator,id=tpm0,chardev=chrtpm
-    -device tpm-tis,tpmdev=tpm0)
+  qemu_tpm=(-chardev 'socket,id=chrtpm,path=tpm.sock' -tpmdev 'emulator,id=tpm0,chardev=chrtpm'
+    -device 'tpm-tis,tpmdev=tpm0')
 }
 
 stop_pid() { # pidfile
@@ -139,7 +139,7 @@ cmd_install() {
   local fw=()
   if [[ -n ${TPM:-} ]]; then
     cp "$OVMF/OVMF_VARS.fd" installer-vars.fd
-    fw=(-drive "if=pflash,format=raw,readonly=on,file=$OVMF/OVMF_CODE.fd" -drive if=pflash,format=raw,file=installer-vars.fd)
+    fw=(-drive "if=pflash,format=raw,readonly=on,file=$OVMF/OVMF_CODE.fd" -drive 'if=pflash,format=raw,file=installer-vars.fd')
   fi
   timeout 900 qemu-system-x86_64 "${qemu_common[@]}" "${qemu_tpm[@]}" "${fw[@]}" -serial file:installer.log \
     -kernel vmlinuz -initrd initramfs.img \
@@ -162,7 +162,7 @@ cmd_debug() {
   local fw=()
   if [[ -n ${TPM:-} ]]; then
     cp "$OVMF/OVMF_VARS.fd" installer-vars.fd
-    fw=(-drive "if=pflash,format=raw,readonly=on,file=$OVMF/OVMF_CODE.fd" -drive if=pflash,format=raw,file=installer-vars.fd)
+    fw=(-drive "if=pflash,format=raw,readonly=on,file=$OVMF/OVMF_CODE.fd" -drive 'if=pflash,format=raw,file=installer-vars.fd')
   fi
   timeout 300 qemu-system-x86_64 "${qemu_common[@]}" "${qemu_tpm[@]}" "${fw[@]}" -serial file:installer.log \
     -kernel vmlinuz -initrd initramfs.img \
@@ -184,18 +184,18 @@ cmd_start() {
   rm -f qmp.sock
   tpm_start
   local args=("${qemu_common[@]}" "${qemu_tpm[@]}" -serial file:target.log -daemonize -pidfile qemu.pid
-    -qmp unix:qmp.sock,server,nowait
+    -qmp 'unix:qmp.sock,server,nowait'
     -drive "if=pflash,format=raw,readonly=on,file=$OVMF/OVMF_CODE.fd"
     -drive "if=pflash,format=raw,file=vars.fd")
   if [[ ${BOOT_DEVICE:-virtio} == nvme ]]; then
-    args+=(-drive file=target.img,format=raw,if=none,id=nvmedisk
-      -device nvme,drive=nvmedisk,serial=inglenook,bootindex=0)
+    args+=(-drive 'file=target.img,format=raw,if=none,id=nvmedisk'
+      -device 'nvme,drive=nvmedisk,serial=inglenook,bootindex=0')
   elif [[ ${BOOT_DEVICE:-virtio} == usb ]]; then
     # As a USB stick behind an xHCI controller, like on real hardware.
-    args+=(-device qemu-xhci,id=xhci -drive file=target.img,format=raw,if=none,id=usbdisk
-      -device usb-storage,bus=xhci.0,drive=usbdisk,bootindex=0)
+    args+=(-device 'qemu-xhci,id=xhci' -drive 'file=target.img,format=raw,if=none,id=usbdisk'
+      -device 'usb-storage,bus=xhci.0,drive=usbdisk,bootindex=0')
   else
-    args+=(-drive file=target.img,format=raw,if=virtio)
+    args+=(-drive 'file=target.img,format=raw,if=virtio')
   fi
   # Extra kernel command line through systemd-stub's SMBIOS string (Secure Boot is off in the VM).
   # The first-boot disk encryption wizard (systemd-cryptenroll --firstboot) waits for input, so
@@ -224,10 +224,10 @@ cmd_start() {
         > vsockd.log 2>&1 < /dev/null &
       echo $! > vsockd.pid
       for _ in $(seq 20); do [[ -S vhost.sock ]] && break; sleep 0.5; done
-      args+=(-machine q35,memory-backend=mem -object memory-backend-memfd,id=mem,size=4G,share=on
-        -chardev socket,id=vsockc,path=vhost.sock -device vhost-user-vsock-pci,chardev=vsockc
+      args+=(-machine 'q35,memory-backend=mem' -object 'memory-backend-memfd,id=mem,size=4G,share=on'
+        -chardev 'socket,id=vsockc,path=vhost.sock' -device 'vhost-user-vsock-pci,chardev=vsockc'
         -nic none) ;;
-    net) args+=(-nic user,hostfwd=tcp::2222-:22) ;;
+    net) args+=(-nic 'user,hostfwd=tcp::2222-:22') ;;
     *) echo "unknown mode $mode" >&2; return 2 ;;
   esac
   : > target.log
@@ -254,6 +254,7 @@ cmd_avc() {
 cmd_new_avc() {
   local new
   # AVC_BASELINE_EXTRA: more known denials for a variant (a space-separated list of files).
+  # shellcheck disable=SC2086 # intentional word splitting: that space-separated list
   new=$(cmd_avc | comm -13 <(sort -u "$HERE/selinux-denials.baseline" ${AVC_BASELINE_EXTRA:-}) -)
   if [[ -z $new ]]; then echo "ok   no new selinux denials"; else
     echo "FAIL new selinux denials (not in selinux-denials.baseline):"; echo "$new" | sed 's/^/       /'; return 1

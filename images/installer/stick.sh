@@ -43,7 +43,7 @@ PTYPE=${PTYPE:-EBD0A0A2-B9E5-4433-87C0-68B6B72699C7}
 # is an error.
 image_variant=$(podman image inspect --format '{{json .Config.Labels}}' "$ref" 2>/dev/null \
   | python3 -c 'import json, sys; print(json.load(sys.stdin).get("io.github.snugmo.inglenook.variant", ""))' 2>/dev/null) || image_variant=
-if [[ -n ${VARIANT:-} && -n ${image_variant:-} && $VARIANT != $image_variant ]]; then
+if [[ -n ${VARIANT:-} && -n ${image_variant:-} && $VARIANT != "$image_variant" ]]; then
   echo "VARIANT=$VARIANT does not match the image's variant ($image_variant); the installed system would not boot." >&2
   exit 1
 fi

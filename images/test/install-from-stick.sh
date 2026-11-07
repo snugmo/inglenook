@@ -79,7 +79,7 @@ if [[ $ENCRYPT == tpm2 ]]; then
   mkdir -p tpm
   "$swtpm" socket --tpm2 --tpmstate dir=tpm --ctrl type=unixio,path=tpm.sock --flags startup-clear --terminate --daemon 2>/dev/null
   for _ in $(seq 20); do [[ -S tpm.sock ]] && break; sleep 0.2; done
-  tpm=(-chardev socket,id=chrtpm,path=tpm.sock -tpmdev emulator,id=tpm0,chardev=chrtpm -device tpm-tis,tpmdev=tpm0)
+  tpm=(-chardev 'socket,id=chrtpm,path=tpm.sock' -tpmdev 'emulator,id=tpm0,chardev=chrtpm' -device 'tpm-tis,tpmdev=tpm0')
 fi
 cp "$OVMF/OVMF_VARS.fd" vars.fd
 qemu-system-x86_64 -accel kvm -machine q35 -cpu host -smp 4 -m "$RAM" -display none -nodefaults -no-reboot "${tpm[@]}" \

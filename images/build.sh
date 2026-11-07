@@ -106,10 +106,10 @@ initrd_systemd=$(strings -n 3 "$tmp/usr/lib/systemd/systemd" 2>/dev/null \
   | grep -oE '"name":"systemd","version":"[^"]+"' | head -1 \
   | sed -E 's/.*"version":"([^"]+)"/\1/')
 [[ -n $initrd_systemd ]] || { echo "error: no systemd version note in the initrd binary" >&2; exit 1; }
-[[ $initrd_systemd == $image_systemd ]] || { echo "error: initrd systemd '$initrd_systemd' != image '$image_systemd' (stale mkosi release?)" >&2; exit 1; }
+[[ $initrd_systemd == "$image_systemd" ]] || { echo "error: initrd systemd '$initrd_systemd' != image '$image_systemd' (stale mkosi release?)" >&2; exit 1; }
 initrd_ver=$(sed -n 's/^VERSION_ID=//p' "$tmp/usr/lib/os-release" 2>/dev/null)
 image_ver=$(podman run --rm "$PRE" sed -n 's/^VERSION_ID=//p' /etc/os-release)
-[[ -z $initrd_ver || $initrd_ver == $image_ver ]] || { echo "error: initrd Fedora $initrd_ver != image Fedora $image_ver" >&2; exit 1; }
+[[ -z $initrd_ver || $initrd_ver == "$image_ver" ]] || { echo "error: initrd Fedora $initrd_ver != image Fedora $image_ver" >&2; exit 1; }
 echo "initrd matches the image: Fedora ${initrd_ver:-?}, systemd $initrd_systemd, kernel $kver"
 
 build --target base -t "$BASE"
