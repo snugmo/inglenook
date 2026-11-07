@@ -1,4 +1,4 @@
-#!/usr/bin/env bash
+#!/bin/sh
 # Build the serial console UKI addon:
 #
 #   images/addons/serial-console.sh <out.addon.efi> [console-arguments]
@@ -12,7 +12,7 @@
 # its .cmdline to the UKI's, no rebuild of the image). Secure Boot must be off
 # (unsigned addon, like the image's UKI). The arguments default to
 # "console=tty0 console=ttyS0,115200n8": the last console= is /dev/console.
-set -euo pipefail
+set -eu
 
 out=${1:?usage: serial-console.sh <out.addon.efi> [console-arguments]}
 cmdline=${2:-console=tty0 console=ttyS0,115200n8}

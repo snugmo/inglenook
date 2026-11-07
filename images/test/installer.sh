@@ -1,7 +1,8 @@
-#!/bin/bash
+#!/bin/sh
 # Runs inside the installer VM (see vm.sh prep). The host shares its work
 # directory over 9p; imgref names the image, inglenook.oci is its archive.
-exec > >(tee /dev/ttyS0) 2>&1
+# The service's StandardOutput=journal+console and the VM's console=ttyS0
+# take every line to the journal and the serial port (no tee needed).
 set -x
 mkdir -p /mnt/share
 mount -t 9p -o trans=virtio,version=9p2000.L share /mnt/share || echo MOUNTFAIL
