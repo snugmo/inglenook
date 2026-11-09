@@ -116,7 +116,7 @@ RUN dnf -y install --exclude=yama-ptrace-enable \
 # wireplumber are the audio/video server and its session manager.
 RUN dnf -y install \
       # compositor, session and the Wayland tools around it
-      foot fuzzel grimshot kanshi sddm sddm-wayland-sway sway swaybg swayidle swaylock waybar \
+      foot fuzzel grimshot kanshi sddm sddm-wayland-sway sway sway-config-fedora swaybg swayidle swaylock waybar \
       wl-clipboard wlr-randr wlroots \
       # graphics drivers and text rendering
       freetype mesa-dri-drivers mesa-vulkan-drivers pango vulkan-loader \
