@@ -96,6 +96,18 @@ bad() { echo "FAIL $1"; fail=1; }
 echo "installer VM: waiting for the shell"
 run 240 'echo 1 > /proc/sys/kernel/printk; for i in $(seq 60); do blkid -L INGLENOOK && break; sleep 1; done' >/dev/null
 run 20 "(INSTALL_DISK=/dev/vda INSTALL_ROOT_SIZE=${ROOT_SIZE:-8G} INSTALL_ENCRYPT=$ENCRYPT INSTALL_RECOVERY_KEY=0 INSTALL_USER=alice INSTALL_TOKEN=1 INSTALL_REALNAME='Alice Example' INSTALL_USER_PASSWORD='correct horse battery' INSTALL_YES=1 INSTALL_NO_REBOOT=1${FIDO2:+ INSTALL_FIDO2=1}${INSTALL_DEBUG:+ INSTALL_DEBUG=1} setsid inglenook-install > /tmp/install.log 2>&1 &)" >/dev/null
+# The FIDO2 section of the install stops the console shell for the duration of
+# the enrolment (the PIN prompt must not share the console) and starts a new
+# one: a serial command that lands in the dead shell never emits its end
+# marker, so wait (with short, retried commands that tolerate the dead shell)
+# until the shell is back before sending the long wait.
+if [[ ${FIDO2:-0} == 1 ]]; then
+  for _ in $(seq 40); do
+    out=$(run 10 'systemctl is-active inglenook-shell' 2>&1) || true
+    grep -qx active <<<"$out" && break
+    sleep 1
+  done
+fi
 run 900 'until grep -q "no longer needed" /tmp/install.log; do sleep 1; if grep -q "^ERROR:" /tmp/install.log; then break; fi; done; grep -c "no longer needed" /tmp/install.log' | tail -1 | grep -q '^1' \
   && ok "the image was extracted from the stick" || bad "the install never got past the image extraction"
 
