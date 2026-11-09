@@ -21,24 +21,65 @@ loglevel=$(cut -f1 /proc/sys/kernel/printk 2>/dev/null)
 quiet() { kill -s RTMIN+21 1 2>/dev/null; dmesg -n 1 2>/dev/null; }
 loud() { kill -s RTMIN+20 1 2>/dev/null; dmesg -n "${loglevel:-4}" 2>/dev/null; }
 quiet
-trap loud EXIT
+
+# Every question goes through systemd-ask-password (this unit owns the console while it runs, and
+# its children have a tty on stdin, so the prompts read the console directly). homectl is kept off
+# the console in turn: the account password rides in $PASSWORD (the first source its ask-password
+# checks) and the key's PIN is pre-seeded as the credential its FIDO2 code checks before it would
+# prompt. (A wrong pre-seeded PIN does not get a second prompt inside homectl - it just retries the
+# token until the PIN locks - so a mistype is handled by the loop around homectl below.) The unit's
+# SetCredential= makes systemd create and label $CREDENTIALS_DIRECTORY; run by hand, the same
+# directory is created here.
+: "${CREDENTIALS_DIRECTORY:=/run/credentials/inglenook-token-enroll.service}"
+[ -d "$CREDENTIALS_DIRECTORY" ] || install -d -m 0700 "$CREDENTIALS_DIRECTORY"
+export CREDENTIALS_DIRECTORY
+wipe() { rm -f "$CREDENTIALS_DIRECTORY/home.token-pin"; }
+trap 'loud; wipe' EXIT
+
 clear 2>/dev/null || printf '\033c'
 
 echo "Security key for '$user'"
 echo "  The key needs a PIN (set one first with: ykman fido access change-pin)."
-echo "  homectl asks for the account password, then for the PIN, and the key blinks: touch it."
+echo "  Enter the account password and the PIN, and the key blinks: touch it."
+
 while :; do
-  read -rp "Insert the key and press Enter (s = skip): " reply || reply=s
-  if [ "$reply" = s ]; then
-    echo "Skipped. Later, as the user: ${cmd[*]}"
-    break
+  # Enter means "the key is in, go on"; only an explicit 's' skips (an empty answer is
+  # indistinguishable from a cancel, so it goes on too).
+  reply=$(systemd-ask-password --emoji=no --icon=user-home --id="token-enroll:insert:$user" \
+    -e "Insert the key and press Enter (s = skip): " 2>/dev/null) || reply=""
+  case $reply in
+    s)
+      echo "Skipped. Later, as the user: ${cmd[*]}"
+      break
+      ;;
+  esac
+
+  # The account password (homed needs it to update the record). An empty answer starts over.
+  pw=$(systemd-ask-password --emoji=no --icon=user-home --id="token-enroll:password:$user" \
+    "Password for '$user': " 2>/dev/null) || pw=""
+  if [ -z "$pw" ]; then
+    echo "No password given; starting over."
+    continue
   fi
-  if "${cmd[@]}"; then
+
+  # The key's PIN. Enter if the key has no PIN: nothing is seeded, and if the token then asks for
+  # one, homectl asks on the console itself (it is the only console reader at that point).
+  pin=$(systemd-ask-password --emoji=no --icon=user-home --id="token-enroll:pin:$user" \
+    "PIN of the security key (Enter if it has no PIN): " 2>/dev/null) || pin=""
+  [ -n "$pin" ] && printf '%s' "$pin" > "$CREDENTIALS_DIRECTORY/home.token-pin"
+
+  rc=0
+  PASSWORD="$pw" "${cmd[@]}" || rc=$?
+
+  if [ $rc -eq 0 ]; then
+    wipe
     echo "Done: '$user' can now log in with the key."
     echo "A second key or a recovery key: ${cmd[0]} ${cmd[1]} ${cmd[2]} --fido2-device=<first> --fido2-device=<second> --recovery-key=yes"
     echo "(each use of --fido2-device= replaces the keys the account has, so list them all)"
     break
   fi
-  echo "That did not work."
+
+  wipe
+  echo "That did not work. (If the key's PIN locked after wrong tries: unplug it and reinsert it.)"
 done
 rm -f "$marker"

@@ -11,6 +11,9 @@ ConditionKernelCommandLine=!inglenook.tokenenroll=no
 [Service]
 Type=oneshot
 ExecStart=/usr/libexec/inglenook/token-enroll
+# a placeholder, to make systemd create and label $CREDENTIALS_DIRECTORY: the script pre-seeds the
+# FIDO2 PIN there as the credential homectl's FIDO2 code reads before it would prompt
+SetCredential=inglenook.tokenenroll=1
 StandardInput=tty-force
 StandardOutput=tty
 StandardError=tty
