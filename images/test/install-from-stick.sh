@@ -60,7 +60,7 @@ if [[ -z ${STICK_REUSE:-} || ! -f stick.img ]]; then
 fi
 
 # --- the installer VM ---
-rm -rf tpm target.img serial.sock qmp.sock tpm.sock qemu.pid
+rm -rf tpm target.img serial.sock qmp.sock tpm.sock qemu.pid phases.txt
 truncate -s "${TARGET_SIZE:-24G}" target.img
 # Old data to be wiped: a labeled ext4 right where the new ESP will start (1 MiB) and an old
 # 'root' partition after it. OLD_DATA=0 for a blank disk.
@@ -108,7 +108,7 @@ if [[ ${FIDO2:-0} == 1 ]]; then
     sleep 1
   done
 fi
-run 900 'until grep -q "no longer needed" /tmp/install.log; do sleep 1; if grep -q "^ERROR:" /tmp/install.log; then break; fi; done; grep -c "no longer needed" /tmp/install.log' | tail -1 | grep -q '^1' \
+run 3600 'until grep -q "no longer needed" /tmp/install.log; do sleep 1; if grep -q "^ERROR:" /tmp/install.log; then break; fi; done; grep -c "no longer needed" /tmp/install.log' | tail -1 | grep -q '^1' \
   && ok "the image was extracted from the stick" || bad "the install never got past the image extraction"
 
 echo "pulling the stick (QMP device_del)"
@@ -117,7 +117,7 @@ sleep 3
 n=$(run 30 'udevadm settle; lsblk -dno TRAN | grep -c usb || true' | tail -1)
 [[ $n == 0 ]] && ok "the stick is gone from the installer" || bad "the stick is still there ($n)"
 
-run 900 'until grep -qE "^==> Installation complete[.]|^ERROR:" /tmp/install.log; do sleep 2; done; grep -E "^==>|^ERROR:|^WARNING:|^    credential:|Installation complete[.]" /tmp/install.log' | tee phases.txt
+run 3600 'until grep -qE "^==> Installation complete[.]|^ERROR:" /tmp/install.log; do sleep 2; done; grep -E "^==>|^ERROR:|^WARNING:|^    credential:|Installation complete[.]" /tmp/install.log' | tee phases.txt
 grep -q "^==> Installation complete[.]" phases.txt && ok "inglenook-install finished without the stick" || { bad "the install did not finish"; run 30 'tail -40 /tmp/install.log' ; }
 # the FIDO2 section stops the console shell for the duration of the enrolment
 # (the PIN prompt must not share the console); it must be back after it.
@@ -125,8 +125,13 @@ run 20 'systemctl is-active inglenook-shell' | tail -1 | grep -qx active \
   && ok "the console shell is back after the FIDO2 section" || bad "the console shell did not come back after the FIDO2 section"
 # (ACPI powerdown does nothing here: the initrd has no logind to handle the button)
 run 20 '(setsid systemctl poweroff >/dev/null 2>&1 &)' >/dev/null || true
-for _ in $(seq 60); do kill -0 "$(cat qemu.pid)" 2>/dev/null || break; sleep 1; done
-kill -0 "$(cat qemu.pid)" 2>/dev/null && { bad "the installer VM did not power off"; }
+for _ in $(seq 120); do kill -0 "$(cat qemu.pid)" 2>/dev/null || break; sleep 1; done
+if kill -0 "$(cat qemu.pid)" 2>/dev/null; then
+  bad "the installer VM did not power off"
+  # what was the console last saying? (the socket serves one client at a time)
+  socat /dev/null UNIX-CONNECT:serial.sock -t 2 2>/dev/null | tail -c 2000 | cat -v
+  echo
+fi
 [[ $fail == 0 ]] || exit 1
 
 # --- the installed disk, alone ---

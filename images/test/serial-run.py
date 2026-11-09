@@ -52,8 +52,8 @@ def read(wait=0.3):
     return got
 
 
-# get a prompt
-end = time.time() + 180
+# get a prompt (up to the command's timeout, capped at 5 minutes)
+end = time.time() + min(300.0, timeout)
 while True:
     sock.send(b"\n")
     read(1.5)
