@@ -160,7 +160,10 @@ unattended (`INSTALL_YES=1`), until it is inserted or `skip` is typed otherwise 
 and runs `systemd-cryptenroll --fido2-device=auto` on each volume it is offered
 for: `--unlock-tpm2-device=auto` on the TPM-sealed /var, `--unlock-empty` on the
 empty-key volumes. The key's PIN, when it has one, is asked through
-ask-password on the console.
+ask-password on the console; that prompt reads the console one character at a
+time, so the installer stops the console shell and the console agent first
+(the keystrokes would otherwise split between them) and starts them again
+after the enrolment.
 
 What the key ends up unlocking is fixed by the boot path, so the installer only
 offers it where the boot path would actually try it:
