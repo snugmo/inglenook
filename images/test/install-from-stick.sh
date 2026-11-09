@@ -96,11 +96,11 @@ bad() { echo "FAIL $1"; fail=1; }
 echo "installer VM: waiting for the shell"
 run 240 'echo 1 > /proc/sys/kernel/printk; for i in $(seq 60); do blkid -L INGLENOOK && break; sleep 1; done' >/dev/null
 run 20 "(INSTALL_DISK=/dev/vda INSTALL_ROOT_SIZE=${ROOT_SIZE:-8G} INSTALL_ENCRYPT=$ENCRYPT INSTALL_RECOVERY_KEY=0 INSTALL_USER=alice INSTALL_TOKEN=1 INSTALL_REALNAME='Alice Example' INSTALL_USER_PASSWORD='correct horse battery' INSTALL_YES=1 INSTALL_NO_REBOOT=1${FIDO2:+ INSTALL_FIDO2=1}${INSTALL_DEBUG:+ INSTALL_DEBUG=1} setsid inglenook-install > /tmp/install.log 2>&1 &)" >/dev/null
-# The FIDO2 section of the install stops the console shell for the duration of
-# the enrolment (the PIN prompt must not share the console) and starts a new
-# one: a serial command that lands in the dead shell never emits its end
-# marker, so wait (with short, retried commands that tolerate the dead shell)
-# until the shell is back before sending the long wait.
+# The FIDO2 section stops the console shell while the key is enrolled (the
+# PIN prompt must not share the console); it leaves it running when no key
+# shows up. A serial command that lands in a dead shell never emits its end
+# marker, so before the long wait, poll with short commands that tolerate the
+# dead shell until the shell is active (no key: it never goes, first check wins).
 if [[ ${FIDO2:-0} == 1 ]]; then
   for _ in $(seq 40); do
     out=$(run 10 'systemctl is-active inglenook-shell' 2>&1) || true
@@ -119,8 +119,8 @@ n=$(run 30 'udevadm settle; lsblk -dno TRAN | grep -c usb || true' | tail -1)
 
 run 3600 'until grep -qE "^==> Installation complete[.]|^ERROR:" /tmp/install.log; do sleep 2; done; grep -E "^==>|^ERROR:|^WARNING:|^    credential:|Installation complete[.]" /tmp/install.log' | tee phases.txt
 grep -q "^==> Installation complete[.]" phases.txt && ok "inglenook-install finished without the stick" || { bad "the install did not finish"; run 30 'tail -40 /tmp/install.log' ; }
-# the FIDO2 section stops the console shell for the duration of the enrolment
-# (the PIN prompt must not share the console); it must be back after it.
+# the FIDO2 section leaves the console shell stopped if a key was enrolled
+# (it restores it on its way out); it must be back after it.
 run 20 'systemctl is-active inglenook-shell' | tail -1 | grep -qx active \
   && ok "the console shell is back after the FIDO2 section" || bad "the console shell did not come back after the FIDO2 section"
 # (ACPI powerdown does nothing here: the initrd has no logind to handle the button)

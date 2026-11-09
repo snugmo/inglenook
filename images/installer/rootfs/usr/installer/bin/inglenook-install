@@ -428,9 +428,16 @@ enroll_volumes_fido2() {
   local vols=$1 vol part method failed=0
   [[ -n $vols ]] || return 0
   say "Enrolling the FIDO2 security key: $vols"
-  fido2_console_takeover
-  printf '  (the console shell is stopped while the key is enrolled)\n'
+  if [ -z "${INSTALL_YES:-}" ]; then
+    # Interactive: take the console up front - the person is told to insert
+    # the key, and the PIN prompt below must own it alone.
+    fido2_console_takeover
+    printf '  (the console shell is stopped while the key is enrolled)\n'
+  fi
   if wait_for_fido2; then
+    # Unattended, a key was found: the console is still up, and the PIN
+    # prompt must not share it (the keystrokes would split between the two).
+    [ -f "$RUN/console-taken" ] || fido2_console_takeover
     fido2_devices | sed 's/^/  /'
     for vol in $vols; do
       if [ "$vol" = root ]; then part=$ROOTPART; method=--unlock-empty
@@ -448,7 +455,8 @@ enroll_volumes_fido2() {
     fido2_console_restore
   else
     warn "No FIDO2 key present: the volumes keep only their current keys (a key can be enrolled later with systemd-cryptenroll, run0)."
-    fido2_console_restore
+    # The unattended no-key path never stopped the console: nothing to restore.
+    if [ -f "$RUN/console-taken" ]; then fido2_console_restore; fi
     return 1
   fi
 }
