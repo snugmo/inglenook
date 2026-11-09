@@ -51,7 +51,9 @@ mkdir -p "$RUN"
 # find_image's vfat mounts: step 7 unmounts them on the way through; an earlier
 # exit (a refusal, a crash) would leave them mounted, and they pile up when the
 # script is run again in the same initrd.
-trap 'for m in "$RUN"/src*; do [ -d "$m" ] && mountpoint -q "$m" 2>/dev/null && umount "$m" 2>/dev/null || true; done' EXIT
+# the marker means the FIDO2 section stopped the console readers (the shell,
+# the agent); a crash mid-section must not leave the stick without a shell.
+trap '[ -f "$RUN/console-taken" ] && fido2_console_restore; for m in "$RUN"/src*; do [ -d "$m" ] && mountpoint -q "$m" 2>/dev/null && umount "$m" 2>/dev/null || true; done' EXIT
 
 say()  { printf '\n==> %s\n' "$*"; }
 warn() { printf '\nWARNING: %s\n' "$*" >&2; }
@@ -390,6 +392,22 @@ ROOTPART=/dev/disk/by-partlabel/root
 # (--unlock-tpm2-device=auto or --unlock-empty), and the key's PIN, when it has
 # one, is asked through ask-password on the console.
 fido2_devices() { systemd-cryptenroll --fido2-device=list 2>/dev/null | grep '^/dev/hidraw' || true; }
+# The interactive shell (inglenook-shell) and the console agent
+# (systemd-ask-password-console) both read /dev/console. The FIDO2 PIN prompt
+# (ask-password, the same mechanism as systemd-ask-password) reads one
+# character at a time, with no line buffering, so with a second reader around
+# the keystrokes split between the two and the PIN arrives garbled. Stop both
+# for the duration of the enrolment (the installer is the only reader while
+# it waits, so cryptenroll's own prompt works); the marker lets a crash
+# restore them through the EXIT trap.
+fido2_console_takeover() {
+  touch "$RUN/console-taken"
+  systemctl stop inglenook-shell.service systemd-ask-password-console.service 2>/dev/null || true
+}
+fido2_console_restore() {
+  rm -f "$RUN/console-taken"
+  systemctl start systemd-ask-password-console.service inglenook-shell.service 2>/dev/null || true
+}
 wait_for_fido2() {
   local n=0 reply
   if [ -n "${INSTALL_YES:-}" ]; then
@@ -410,6 +428,8 @@ enroll_volumes_fido2() {
   local vols=$1 vol part method failed=0
   [[ -n $vols ]] || return 0
   say "Enrolling the FIDO2 security key: $vols"
+  fido2_console_takeover
+  printf '  (the console shell is stopped while the key is enrolled)\n'
   if wait_for_fido2; then
     fido2_devices | sed 's/^/  /'
     for vol in $vols; do
@@ -425,8 +445,10 @@ enroll_volumes_fido2() {
       fi
     done
     [ $failed = 0 ] && FIDO2_ENROLLED=1
+    fido2_console_restore
   else
     warn "No FIDO2 key present: the volumes keep only their current keys (a key can be enrolled later with systemd-cryptenroll, run0)."
+    fido2_console_restore
     return 1
   fi
 }
