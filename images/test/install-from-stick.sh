@@ -107,6 +107,10 @@ n=$(run 30 'udevadm settle; lsblk -dno TRAN | grep -c usb || true' | tail -1)
 
 run 900 'until grep -qE "^==> Installation complete[.]|^ERROR:" /tmp/install.log; do sleep 2; done; grep -E "^==>|^ERROR:|^WARNING:|^    credential:|Installation complete[.]" /tmp/install.log' | tee phases.txt
 grep -q "^==> Installation complete[.]" phases.txt && ok "inglenook-install finished without the stick" || { bad "the install did not finish"; run 30 'tail -40 /tmp/install.log' ; }
+# the FIDO2 section stops the console shell for the duration of the enrolment
+# (the PIN prompt must not share the console); it must be back after it.
+run 20 'systemctl is-active inglenook-shell' | tail -1 | grep -qx active \
+  && ok "the console shell is back after the FIDO2 section" || bad "the console shell did not come back after the FIDO2 section"
 # (ACPI powerdown does nothing here: the initrd has no logind to handle the button)
 run 20 '(setsid systemctl poweroff >/dev/null 2>&1 &)' >/dev/null || true
 for _ in $(seq 60); do kill -0 "$(cat qemu.pid)" 2>/dev/null || break; sleep 1; done
