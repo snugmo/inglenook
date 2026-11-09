@@ -433,7 +433,13 @@ RUN authselect select $(authselect current --raw) with-systemd-homed with-group-
 
 # Local SELinux policy. The CIL modules in rootfs/usr/share/inglenook/selinux
 # are installed into the policy store (/etc/selinux, so the factory copy below
-# carries them). The stock dontaudit rules stay in, which keeps the audit log free
+# carries them). inglenook.cil is ours; apse.cil is vendored from the apse repo
+# (the same pin the apse-build stage builds from) and defines the apse_t /
+# apse_app_t / apse_shim_t domains plus the apse_exec_t file context for
+# /usr/bin/apse — a deployed system labels the binary with `restorecon` and the
+# exec transition into apse_t fires (the stack runs unconfined until then). It
+# needs flatpak_home_t, so the flatpak-selinux in the desktop install above
+# must stay. The stock dontaudit rules stay in, which keeps the audit log free
 # of process-transition noise (siginh, rlimitinh, noatsecure). For policy work,
 # SELINUX_NO_DONTAUDIT=1 rebuilds the policy without dontaudit rules, so that
 # `ausearch -m avc` shows every denial, including the ones the stock policy hides.

@@ -175,8 +175,12 @@ reasoning) and, where relevant, the topic docs.
     on the Sway desktop (successor to wlsctx) — has no releases, so the
     `apse-build` stage builds the binary with cargo from a commit pinned by
     tarball SHA-256 (`--locked`); only `/usr/bin/apse` goes into the image.
-    Its user units (the clipboard prompt broker) and SELinux module are not
-    installed; they are per-user / per-deployment. Details: docs/bootc.md.
+    Its SELinux module is vendored next to `inglenook.cil` and installed by
+    the same `semodule -n -i` (it needs `flatpak_home_t`, so flatpak-selinux
+    stays in the desktop dnf); `restorecon /usr/bin/apse` on a deployed system
+    labels it `apse_exec_t` and starts the confined run. The user units (the
+    clipboard prompt broker) are not installed; they are per-user. Details:
+    docs/bootc.md.
 6. **No dracut**: the initrd is built by mkosi (`images/initrd`) from the
    `pre` stage's kernel modules and bootc's `initramfs-setup`/`bootc-root-setup.service`,
    and installed as `/usr/lib/modules/<kver>/initramfs.img` in the `base`

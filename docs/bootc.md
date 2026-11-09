@@ -131,7 +131,15 @@ flow), to be added to `images/build.sh` rather than a second `Containerfile`.
   sockets; the successor to wlsctx) — has no releases, so the `apse-build`
   stage at the top of the Containerfile builds the binary with cargo from a
   commit pinned by tarball SHA-256 (`--locked`); only `/usr/bin/apse` goes
-  into the image. Its user units (the clipboard prompt broker) and SELinux
-  module (`selinux/apse.cil`) are not installed; they are per-user /
-  per-deployment (the README's broker unit expects `/usr/local/bin/apse`, a
-  one-line drop-in if it is used).
+  into the image. Its SELinux module is vendored at
+  `rootfs/usr/share/inglenook/selinux/apse.cil` (the same pin the stage builds
+  from) and is installed into the policy store by the same `semodule -n -i`
+  as `inglenook.cil`; the factory /etc snapshot carries the store, so on a
+  deployed system the policy defines `apse_t` / `apse_app_t` / `apse_shim_t`
+  and the `apse_exec_t` file context for `/usr/bin/apse` — `restorecon
+  /usr/bin/apse` labels the binary and the exec transition into `apse_t`
+  fires (the stack runs unconfined, module inert, until it is). It requires
+  the flatpak types (`flatpak_home_t`), so `flatpak-selinux` stays in the
+  desktop dnf above. The user units (the clipboard prompt broker) are not
+  installed; they are per-user (the README's broker unit expects
+  `/usr/local/bin/apse`, a one-line drop-in if it is used).
