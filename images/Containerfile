@@ -396,6 +396,12 @@ RUN systemctl mask bootc-generic-growpart.service systemd-growfs-root.service sy
 RUN systemctl disable mcelog.service
 
 # Static files that belong in the image as they are (units, ...): see rootfs/.
+# Its usr/lib/os-release is the system's identity (NAME, PRETTY_NAME, VARIANT):
+# /etc/os-release is the standard symlink to it, so a wiped /etc never changes
+# it, and the UKI stage embeds a copy (ukify --os-release, below). Its
+# DEFAULT_HOSTNAME is what systemd uses when /etc/hostname is absent (a wiped
+# /etc); avahi advertises <name>.local and the login banner
+# (rootfs/usr/lib/issue.d) shows it with the IP addresses.
 COPY rootfs/ /
 RUN systemctl enable inglenook-token-enroll.service netbird.service inglenook-var-relabel.service
 
@@ -403,11 +409,6 @@ RUN systemctl enable inglenook-token-enroll.service netbird.service inglenook-va
 # The base already points default.target at graphical.target; this states it, as an
 # /etc override that the factory copy below carries.
 RUN systemctl set-default graphical.target && systemctl is-enabled sddm.service
-
-# systemd uses DEFAULT_HOSTNAME from os-release when /etc/hostname is absent, so
-# a wiped /etc still gets a sensible name; avahi advertises it as <name>.local
-# and the login banner (rootfs/usr/lib/issue.d) shows it with the IP addresses.
-RUN sed -i 's/^DEFAULT_HOSTNAME=.*/DEFAULT_HOSTNAME="inglenook"/' /usr/lib/os-release
 
 # Account & access. No regular account and no ssh key are baked into the image: root
 # is locked, and the first user is a systemd-homed account that the installer asks
