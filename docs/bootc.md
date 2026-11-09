@@ -125,9 +125,13 @@ flow), to be added to `images/build.sh` rather than a second `Containerfile`.
   shows the text mode with the boot messages; add `splash` (and `quiet`) to
   `KARGS` for the graphical splash. Untested on the machine; its SELinux
   denials, if any, are not yet in the policy.
-- **wlsctx** (github.com/wlsctx/wlsctx) has no releases and its ghcr image is
-  not public, so the `wlsctx-build` stage at the top of the Containerfile
-  builds the binary with cargo from a commit pinned by tarball SHA-256
-  (`--locked`); only `/usr/bin/wlsctx` goes into the image. Its quadlets, user
-  units and SELinux blocks are not installed; they are per-user and need the
-  pod images.
+- **apse** (github.com/snugmo/apse) — the unprivileged in-process sandbox for
+  GUI apps on the Sway desktop (namespaces + a rebuilt rootfs + Landlock/
+  seccomp via the nono crate, and `wp_security_context_v1`-tagged Wayland
+  sockets; the successor to wlsctx) — has no releases, so the `apse-build`
+  stage at the top of the Containerfile builds the binary with cargo from a
+  commit pinned by tarball SHA-256 (`--locked`); only `/usr/bin/apse` goes
+  into the image. Its user units (the clipboard prompt broker) and SELinux
+  module (`selinux/apse.cil`) are not installed; they are per-user /
+  per-deployment (the README's broker unit expects `/usr/local/bin/apse`, a
+  one-line drop-in if it is used).

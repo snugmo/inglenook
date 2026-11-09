@@ -171,12 +171,12 @@ reasoning) and, where relevant, the topic docs.
     to it, no glue needed. The kernel command line has no `splash`/`quiet`
     (text mode with the boot messages); add them to `KARGS` for the graphical
     splash. Details: docs/bootc.md.
-6c. **wlsctx** (github.com/wlsctx/wlsctx) has no releases and its ghcr image
-    is not public, so the `wlsctx-build` stage builds the binary with cargo
-    from a commit pinned by tarball SHA-256 (`--locked`); only
-    `/usr/bin/wlsctx` goes into the image. Its quadlets, user units and SELinux
-    blocks are not installed; they are per-user and need the pod images.
-    Details: docs/bootc.md.
+6c. **apse** (github.com/snugmo/apse) — the in-process sandbox for GUI apps
+    on the Sway desktop (successor to wlsctx) — has no releases, so the
+    `apse-build` stage builds the binary with cargo from a commit pinned by
+    tarball SHA-256 (`--locked`); only `/usr/bin/apse` goes into the image.
+    Its user units (the clipboard prompt broker) and SELinux module are not
+    installed; they are per-user / per-deployment. Details: docs/bootc.md.
 6. **No dracut**: the initrd is built by mkosi (`images/initrd`) from the
    `pre` stage's kernel modules and bootc's `initramfs-setup`/`bootc-root-setup.service`,
    and installed as `/usr/lib/modules/<kver>/initramfs.img` in the `base`
