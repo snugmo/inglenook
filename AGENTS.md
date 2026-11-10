@@ -77,6 +77,17 @@ docs/            # On-demand reference docs — read when relevant (see below)
   no desktop/GUI), not UBI; has no baked-in account (the first user is created
   by the installer). We stay off Rawhide/46 so unfinished upstream work doesn't
   mask our own tooling issues.
+- The 3D (sbix) Noto Color Emoji builds (versioned release zip, ~826 MB
+  unpacked in `/usr/share/fonts`) give terminals like foot their color emoji:
+  the RPM only ships the COLRv1 variant, which fcft rejects, and fontconfig
+  ranks that file first for the shared family name — fcft's primary is the
+  first ranked candidate, so a rejected primary fails the whole family (foot
+  ends on monochrome). `rootfs/etc/fonts/conf.d/60-noto-emoji-3d.conf`
+  injects `foundry=GOOG` into any request for the family (a `<match
+  target="pattern">` rule), excluding the COLRv1 file (foundry=NONE) from
+  FcFontSort so the primary is a 3D file FreeType renders in color; no
+  per-user foot.ini edit is needed. The zip is pinned by SHA-256 in the
+  Containerfile.
 - The final stage must be a bootc stage — our base already is, and the stage is
   inherited through added layers. Never base a stage on a *non*-bootc image
   without adding a `switch-to-bootc-container` step.

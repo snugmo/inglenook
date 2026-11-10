@@ -160,6 +160,30 @@ RUN dnf -y install \
       vercel-geist-vf-fonts \
  && dnf clean all
 
+# Noto Color Emoji, the 3D (sbix) builds, from a versioned release zip: the
+# one terminals want. The sbix builds render through FreeType's native sbix
+# driver and are the fastest of the color builds; the 2D (CBDT) builds also
+# render but their fixed-size bitmaps (a 109 px strike) lag on first render.
+# The zip (821 MB, 826 MB unpacked) carries all the size and flag variants
+# and the license, and is pinned by SHA-256. Fedora's
+# google-noto-color-emoji-fonts ships only the COLRv1 build, which fcft
+# (foot's font library) rejects; the builds share the family name and
+# fontconfig ranks the COLRv1 file first, and fcft's primary is the first
+# ranked candidate, so a rejected primary would fail the whole family (foot
+# then falls back to monochrome). rootfs/etc/fonts/conf.d/60-noto-emoji-3d.conf
+# adds foundry=GOOG to any request for the family (a <match target="pattern">
+# rule), excluding the COLRv1 file (foundry=NONE) from FcFontSort so the
+# primary is a 3D file FreeType renders in color — system-wide, no
+# per-user foot.ini edit.
+ADD --chmod=0644 --checksum=sha256:ff931ea940003559f25a63472092b0f5038b36ff2352c3c2e77649ee4aa599bf \
+    https://github.com/googlefonts/noto-emoji/releases/download/v2026-09-24-unicode18_0/Noto-3D-Emoji-Fonts.zip \
+    /tmp/Noto-3D-Emoji-Fonts.zip
+ADD rootfs/etc/fonts/conf.d/60-noto-emoji-3d.conf /etc/fonts/conf.d/60-noto-emoji-3d.conf
+RUN unzip -q -o /tmp/Noto-3D-Emoji-Fonts.zip -d /usr/share/fonts \
+ && rm /tmp/Noto-3D-Emoji-Fonts.zip \
+ && chmod 0644 /usr/share/fonts/Noto-3D-*.ttf /usr/share/fonts/LICENSE \
+ && fc-cache -f /usr/share/fonts
+
 # More userspace tools. Already in the layers above or in the base, so not
 # repeated: buildah, podman, skopeo, bubblewrap, ca-certificates, gawk, gnupg2,
 # gpgme, fish, zsh, xxd, lz4, sqlite, xxhash, yq, zip, zlib-ng, tree, which,
