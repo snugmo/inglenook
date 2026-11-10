@@ -10,7 +10,8 @@ you confirm it.
    the installer are not signed yet).
 2. Boot this drive (the firmware's one-time boot menu, usually F12, F8 or Esc;
    it must be a UEFI entry for this drive).
-3. A root shell appears on the screen. Run:   inglenook-install
+3. A root shell appears on the screen (and on the serial console, if this
+   drive has loader/addons/serial-console.addon.efi). Run:   inglenook-install
    It lists the disks, shows what is on the one you pick, asks for the size of
    the root, whether to encrypt with the TPM, and the first user (root is locked,
    so without a user nobody can log in), then installs.

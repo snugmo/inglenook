@@ -1,0 +1,38 @@
+[Unit]
+Description=Inglenook installer shell (serial console)
+DefaultDependencies=no
+After=basic.target
+After=systemd-udevd.service
+# a TPM that firmware reports is up before the first prompt (ordering only, no Wants=)
+After=tpm2.target
+Conflicts=shutdown.target
+Before=shutdown.target
+# Only when the machine has a serial port: /dev/ttyS0 exists only when the kernel
+# has a UART, so this is the gate (a udev-created node, hence After=udevd). This
+# is the per-console-shell goal - a shell on every terminal the user could be on,
+# whatever the input method - and it does not depend on the serial-console addon:
+# the addon only redirects the *kernel's* console output to the port, it is not
+# what opens the shell. (Gating on the node, not on a console= kernel argument,
+# also means a machine without a UART never starts a unit that would fail and
+# restart: the node is simply absent.)
+ConditionPathExists=/dev/ttyS0
+
+# The twin of inglenook-shell.service (the keyboard console, /dev/tty0): the
+# installer must work whichever console the user is on, and /dev/console is
+# the last console= on the kernel command line, so the two bind their ttys
+# explicitly instead of both fighting over the same one.
+[Service]
+Environment=HOME=/root
+Environment=PATH=/usr/installer/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin
+WorkingDirectory=-/root
+ExecStart=/usr/installer/bin/shell
+Type=idle
+Restart=always
+RestartSec=0
+StandardInput=tty-force
+TTYPath=/dev/ttyS0
+StandardOutput=inherit
+StandardError=inherit
+KillMode=process
+IgnoreSIGPIPE=no
+SendSIGHUP=yes

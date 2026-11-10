@@ -95,16 +95,21 @@ bad() { echo "FAIL $1"; fail=1; }
 
 echo "installer VM: waiting for the shell"
 run 240 'echo 1 > /proc/sys/kernel/printk; for i in $(seq 60); do blkid -L INGLENOOK && break; sleep 1; done' >/dev/null
+# One shell per console: the keyboard console (tty0) always, the serial one
+# (ttyS0) when the stick's serial-console addon selects it. Both must be up.
+shells_up() { run 20 'a=$(systemctl is-active inglenook-shell); b=$(systemctl is-active inglenook-shell-serial); [ $a = active ] && [ $b = active ] && echo up'; }
+shells_up | tail -1 | grep -qx up \
+  && ok "the installer has a shell on the keyboard and the serial console" || bad "the installer's per-console shells are not both up"
 run 20 "(INSTALL_DISK=/dev/vda INSTALL_ROOT_SIZE=${ROOT_SIZE:-8G} INSTALL_ENCRYPT=$ENCRYPT INSTALL_RECOVERY_KEY=0 INSTALL_USER=alice INSTALL_TOKEN=1 INSTALL_REALNAME='Alice Example' INSTALL_USER_PASSWORD='correct horse battery' INSTALL_YES=1 INSTALL_NO_REBOOT=1${FIDO2:+ INSTALL_FIDO2=1}${INSTALL_DEBUG:+ INSTALL_DEBUG=1} setsid inglenook-install > /tmp/install.log 2>&1 &)" >/dev/null
-# The FIDO2 section stops the console shell while the key is enrolled (the
-# PIN prompt must not share the console); it leaves it running when no key
+# The FIDO2 section stops the console shells while the key is enrolled (the
+# PIN prompt must not share the console); it leaves them running when no key
 # shows up. A serial command that lands in a dead shell never emits its end
 # marker, so before the long wait, poll with short commands that tolerate the
-# dead shell until the shell is active (no key: it never goes, first check wins).
+# dead shells until both are active (no key: they never go down, first check wins).
 if [[ ${FIDO2:-0} == 1 ]]; then
   for _ in $(seq 40); do
-    out=$(run 10 'systemctl is-active inglenook-shell' 2>&1) || true
-    grep -qx active <<<"$out" && break
+    out=$(shells_up 2>&1) || true
+    grep -qx up <<<"$out" && break
     sleep 1
   done
 fi
@@ -119,10 +124,10 @@ n=$(run 30 'udevadm settle; lsblk -dno TRAN | grep -c usb || true' | tail -1)
 
 run 3600 'until grep -qE "^==> Installation complete[.]|^ERROR:" /tmp/install.log; do sleep 2; done; grep -E "^==>|^ERROR:|^WARNING:|^    credential:|Installation complete[.]" /tmp/install.log' | tee phases.txt
 grep -q "^==> Installation complete[.]" phases.txt && ok "inglenook-install finished without the stick" || { bad "the install did not finish"; run 30 'tail -40 /tmp/install.log' ; }
-# the FIDO2 section leaves the console shell stopped if a key was enrolled
-# (it restores it on its way out); it must be back after it.
-run 20 'systemctl is-active inglenook-shell' | tail -1 | grep -qx active \
-  && ok "the console shell is back after the FIDO2 section" || bad "the console shell did not come back after the FIDO2 section"
+# the FIDO2 section leaves the console shells stopped if a key was enrolled
+# (it restores them on its way out); they must be back after it.
+shells_up | tail -1 | grep -qx up \
+  && ok "the console shells are back after the FIDO2 section" || bad "a console shell did not come back after the FIDO2 section"
 # (ACPI powerdown does nothing here: the initrd has no logind to handle the button)
 run 20 '(setsid systemctl poweroff >/dev/null 2>&1 &)' >/dev/null || true
 for _ in $(seq 120); do kill -0 "$(cat qemu.pid)" 2>/dev/null || break; sleep 1; done

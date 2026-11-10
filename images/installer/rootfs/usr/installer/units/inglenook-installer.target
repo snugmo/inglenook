@@ -1,6 +1,12 @@
 [Unit]
 Description=Inglenook installer
 Documentation=file:///usr/installer/README
-Requires=basic.target inglenook-shell.service
-After=basic.target inglenook-shell.service
+# One root shell per console the user might be on: the keyboard console always,
+# the serial one whenever the machine has a serial port. Both are Wanted rather
+# than Required: a shell unit that cannot run (its tty missing) must never block
+# the installer target - the other consoles keep working, and a boot with no
+# console at all is unusable anyway.
+Requires=basic.target
+Wants=inglenook-shell.service inglenook-shell-serial.service
+After=basic.target inglenook-shell.service inglenook-shell-serial.service
 AllowIsolate=yes

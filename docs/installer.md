@@ -1,8 +1,10 @@
 # The installer stick
 
 A stick that installs Inglenook onto a disk of the machine it is plugged into. It boots
-a root shell in the *initrd*, runs `inglenook-install`, and is not needed once the image
-has been copied. Secure Boot must be off (the UKI and the addon are unsigned).
+a root shell in the *initrd* — one per console, so it works whichever terminal the user
+is on: the keyboard console always, the serial one whenever the machine has a serial
+port — then `inglenook-install`. It is not needed once the image has
+been copied. Secure Boot must be off (the UKI and the addon are unsigned).
 
 ## What the stick is
 
@@ -54,9 +56,22 @@ the stick or on an installed system, comes from this file on the ESP: the stub
 appends the addon's cmdline to the UKI's. `console=` only selects which consoles are
 shown and grants no privilege, which is what makes it safe in that role (a locked-down
 system needs the addon signed like the UKI; here it is unsigned, with Secure Boot off).
-The addon's own boot is what the installer's root shell and the tests read on the
-serial; without it (real firmware adds no console of its own) the installer would have
-no console at all.
+The addon's boot is what the tests read on the serial. The installer runs one root
+shell per console: `inglenook-shell` on the keyboard console and `inglenook-shell-serial`
+on the serial, each starting whenever its tty node exists (`/dev/tty0` and
+`/dev/ttyS0`). That is the point of the split - a shell on every terminal the user
+could be on, whichever input method they choose - and it is deliberately *not* gated
+on the addon: the addon only redirects the kernel's *console output* to the port, it
+is not what opens the shell (a `ConditionKernelCommandLine` gate would also be the
+wrong tool: systemd matches that directive against whole words and whole
+`key=value` assignments, never against a glob). The target `Wants` both shells
+rather than requiring them, so a console that cannot be opened never blocks the boot
+target. Each unit binds its tty explicitly (`TTYPath=`): `/dev/console` is the *last*
+`console=`, so a single shell on it would leave the screen without a shell the moment
+the addon selects the serial console, which is what this split fixes. (The kernel's
+own console output goes to the last `console=` only, so with the addon the boot
+messages are on the serial; the two consoles show different things and that is
+by design.)
 
 ## The two image variants
 
@@ -161,10 +176,10 @@ and runs `systemd-cryptenroll --fido2-device=auto` on each volume it is offered
 for: `--unlock-tpm2-device=auto` on the TPM-sealed /var, `--unlock-empty` on the
 empty-key volumes. The key's PIN, when it has one, is asked through
 ask-password on the console; that prompt reads the console one character at a
-time, so the installer stops the console shell and the console agent before
-it asks (the keystrokes would otherwise split between them) and starts them
-again after the enrolment - unattended, only when a key actually shows up,
-so an install without one keeps the console up the whole time.
+time, so the installer stops the console shells (both of them) and the console
+agent before it asks (the keystrokes would otherwise split between them) and
+starts them again after the enrolment - unattended, only when a key actually
+shows up, so an install without one keeps the consoles up the whole time.
 
 What the key ends up unlocking is fixed by the boot path, so the installer only
 offers it where the boot path would actually try it:
@@ -193,11 +208,13 @@ it.
 
 ## Tests
 
-- `images/test/installer-env.sh`: the addon on a stick without the image: root shell in the initrd,
-  banner, every installer tool runs.
+- `images/test/installer-env.sh`: the addon on a stick without the image: root shell in the initrd
+  (one on the keyboard console, one on the serial, each bound to its own tty), banner, every
+  installer tool runs.
 - `images/test/install-from-stick.sh`: the whole install onto a disk that holds old data, a first
   user, the stick pulled over QMP as soon as it is no longer needed, then the disk booted
-  alone: the root and /var volumes are in the state the chosen `ENCRYPT=tpm2|luks|none`
+  alone: a shell is up on each console (keyboard, and serial while the stick's addon is on
+  it) before and after the FIDO2 section; the root and /var volumes are in the state the chosen `ENCRYPT=tpm2|luks|none`
   promises (TPM2 token, empty slot, or plain), /var is XFS, the serial-console addon
   is on the ESP (the console question is auto-answered by `INSTALL_YES=1`), the
   account exists, is in `wheel`, takes the password and not a wrong one, and the

@@ -51,7 +51,7 @@ mkdir -p "$RUN"
 # find_image's vfat mounts: step 7 unmounts them on the way through; an earlier
 # exit (a refusal, a crash) would leave them mounted, and they pile up when the
 # script is run again in the same initrd.
-# the marker means the FIDO2 section stopped the console readers (the shell,
+# the marker means the FIDO2 section stopped the console readers (the shells,
 # the agent); a crash mid-section must not leave the stick without a shell.
 trap '[ -f "$RUN/console-taken" ] && fido2_console_restore; for m in "$RUN"/src*; do [ -d "$m" ] && mountpoint -q "$m" 2>/dev/null && umount "$m" 2>/dev/null || true; done' EXIT
 
@@ -392,21 +392,23 @@ ROOTPART=/dev/disk/by-partlabel/root
 # (--unlock-tpm2-device=auto or --unlock-empty), and the key's PIN, when it has
 # one, is asked through ask-password on the console.
 fido2_devices() { systemd-cryptenroll --fido2-device=list 2>/dev/null | grep '^/dev/hidraw' || true; }
-# The interactive shell (inglenook-shell) and the console agent
-# (systemd-ask-password-console) both read /dev/console. The FIDO2 PIN prompt
-# (ask-password, the same mechanism as systemd-ask-password) reads one
-# character at a time, with no line buffering, so with a second reader around
-# the keystrokes split between the two and the PIN arrives garbled. Stop both
-# for the duration of the enrolment (the installer is the only reader while
-# it waits, so cryptenroll's own prompt works); the marker lets a crash
-# restore them through the EXIT trap.
+# The console shells (inglenook-shell on the keyboard console,
+# inglenook-shell-serial on the serial one, when it runs) and the console
+# agent (systemd-ask-password-console) all read the console the FIDO2 prompt
+# lands on. The FIDO2 PIN prompt (ask-password, the same mechanism as
+# systemd-ask-password) reads one character at a time, with no line
+# buffering, so with a second reader around the keystrokes split between the
+# two and the PIN arrives garbled. Stop all of them for the duration of the
+# enrolment (the installer is the only reader while it waits, so
+# cryptenroll's own prompt works); the marker lets a crash restore them
+# through the EXIT trap.
 fido2_console_takeover() {
   touch "$RUN/console-taken"
-  systemctl stop inglenook-shell.service systemd-ask-password-console.service 2>/dev/null || true
+  systemctl stop inglenook-shell.service inglenook-shell-serial.service systemd-ask-password-console.service 2>/dev/null || true
 }
 fido2_console_restore() {
   rm -f "$RUN/console-taken"
-  systemctl start systemd-ask-password-console.service inglenook-shell.service 2>/dev/null || true
+  systemctl start systemd-ask-password-console.service inglenook-shell.service inglenook-shell-serial.service 2>/dev/null || true
 }
 wait_for_fido2() {
   local n=0 reply
