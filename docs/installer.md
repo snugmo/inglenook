@@ -241,7 +241,41 @@ console shell is an interactive bash: a `!!` in a command is history expansion, 
 
 ## Not done yet
 
-Swap, an unattended mode driven by a config file, a PCR policy for the TPM keys,
-LVM (an addon if ever needed), and any test on real hardware. (FIDO2 keys for the
-*volumes* are offered by the installer, above; the account's key is offered at the
+**Unattended mode driven by a config file** — the whole flow already runs from
+`INSTALL_*` environment variables (the tests use them); a file on the stick
+(e.g. `/inglenook/install.conf`) mapped to them would let a machine boot from
+the stick and install itself, then reboot into the new system. Open question:
+creating the first user needs the plain password (homed refuses a hash alone,
+gotcha 25), so the unattended flow carries it on the stick until first boot.
+
+**Progress feedback on the long steps** — `bootc install` runs for several
+minutes with a dead console; a `say` line before each long step.
+
+**The destructive confirmation in the systemd-ask-password idiom** — the wipe
+confirmation is a plain `read`; the `-e` uppercase-`YES` pattern (as in the
+other scripts) is more robust (it also works if the installer is backgrounded)
+and consistent with the first-boot wizard. By extension: the `ask`/`yes_no`
+questions.
+
+**The FIDO2 console blackout, revisited** — with a real key present, the
+enrolment still stops the console shell for ~15 s. The token-enroll wizard
+proved the alternative: the installer reads the PIN itself (masked, on its own
+stdin, with nothing else reading the console) and pre-seeds it as the
+`cryptenroll.fido2-pin` credential, so cryptenroll never opens the console; a
+retry loop handles a wrong PIN. (Rejected in favour of the pure ask-password
+idiom before the wizard existed; the pattern is demonstrated now.)
+
+**Upstream: homed's `perMachine: null`** — a record without the field breaks
+`homectl update --fido2-device=`; the installer works around it by injecting
+`perMachine: []` into the first user's credential. A candidate for
+`docs/upstream/`.
+
+**Testing the interactive path** — every test answers through the environment;
+the typed prompts are only exercised for refusals (install-safety.sh). A
+serial-driven run that types the real flow (disk choice, confirmation,
+questions) would close the gap (`serial-shell.py` is the tool).
+
+Smaller / open-ended: Swap, a PCR policy for the TPM keys, LVM (an addon if
+ever needed), and any test on real hardware. (FIDO2 keys for the *volumes*
+are offered by the installer, above; the account's key is offered at the
 first boot.)
