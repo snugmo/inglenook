@@ -147,8 +147,8 @@ installer wrote the machine id, so its
 `ConditionFileNotEmpty=!/sysroot/etc/machine-id` fails; an empty-slot volume
 would also exit silently through `--prompt-suppress=password`) but still acts
 on a pre-installer legacy install (the tests pass `systemd.firstboot=no` via
-the SMBIOS string, and `inglenook.cryptenroll=no` through our drop-in
-condition). The TPM keys have no PCR policy yet (bootc's cryptenroll uses
+the SMBIOS string in the default boots; the boots that allow the homed
+first-boot wizard run the unit as-is, where it is a no-op). The TPM keys have no PCR policy yet (bootc's cryptenroll uses
 none, and the VM's OVMF does not measure). bootc state stays on the ext4
 root. Early units that create directories in `/var` themselves race tmpfiles
 on the empty filesystem and get denied: order them after
@@ -320,7 +320,6 @@ that on, and would make the initrd's cryptenroll wizard, which tests
 which is now the case on an install without a first user: the wizard asks for
 one at the first boot (the account joins `wheel`). Without a credential it
 prompts on the console. `systemd.firstboot=no` (what `vm.sh` adds by default)
-also skips this wizard: tests that need it use `VM_FIRSTBOOT=1` and skip the
-disk-encryption wizard (it prompts on a console nobody answers) with
-`VM_CMDLINE=inglenook.cryptenroll=no`, a condition our drop-in adds to it in
-the initrd (`systemd.mask=` did not stop it there).
+also skips this wizard: tests that need it use `VM_FIRSTBOOT=1` (which also
+allows the disk-encryption first-boot wizard; on an installed system that
+one is a no-op, the installer having written the machine id).

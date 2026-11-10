@@ -198,8 +198,10 @@ cmd_start() {
     args+=(-drive 'file=target.img,format=raw,if=virtio')
   fi
   # Extra kernel command line through systemd-stub's SMBIOS string (Secure Boot is off in the VM).
-  # The first-boot disk encryption wizard (systemd-cryptenroll --firstboot) waits for input, so
-  # the tests skip it unless VM_FIRSTBOOT=1.
+  # systemd.firstboot=no keeps the first-boot wizards off in the default boots (the
+  # disk-encryption one waits for input on a console nobody answers); VM_FIRSTBOOT=1
+  # allows them for the boots that need the homed wizard to create the first user
+  # (the disk-encryption one is a no-op on an installed system).
   # The image has no console= (see the Containerfile); the tests read the serial
   # one - from the UKI addon on the ESP (installed above) and from here: a
   # locked-down image ignores the SMBIOS string, so the addon is its only route.

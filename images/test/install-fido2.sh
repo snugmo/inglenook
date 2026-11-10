@@ -60,7 +60,7 @@ export WORK=$B
 if [[ $ENCRYPT == tpm2 ]]; then export TPM=1; else export TPM=0; fi
 # The disk's first boot already happened in install-from-stick; keep the
 # same wizard-suppression conditions so no prompt can block these boots.
-export VM_FIRSTBOOT=1 VM_CMDLINE="inglenook.cryptenroll=no inglenook.tokenenroll=no"
+export VM_FIRSTBOOT=1 VM_CMDLINE="inglenook.tokenenroll=no"
 check() { # description command-run-as-root-in-VM expected
   local got; got=$(SSH_USER=root "$vm" ssh "$2" 2>&1 || true)
   if [[ $got == "$3" ]]; then ok "$1"; else echo "FAIL $1: got '$got', want '$3'"; fail=1; fi

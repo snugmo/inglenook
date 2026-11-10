@@ -147,8 +147,8 @@ mv "$IWORK/target.img" "$B/target.img"
 [[ $ENCRYPT == tpm2 ]] && cp -r "$IWORK/tpm" "$B/tpm"
 cp "$KEY" "$B/key"; ssh-keygen -y -f "$B/key" > "$B/key.pub"; chmod 600 "$B/key"
 # The first-boot wizard of homed must run (it creates the user from the credential), so no
-# systemd.firstboot=no; the disk-encryption wizard asks on a console nobody answers.
-export VM_FIRSTBOOT=1 VM_CMDLINE="inglenook.cryptenroll=no inglenook.tokenenroll=no"
+# systemd.firstboot=no (the disk-encryption wizard is a no-op on an installed system).
+export VM_FIRSTBOOT=1 VM_CMDLINE="inglenook.tokenenroll=no"
 echo "boot: the installed disk alone"
 "$vm" start net
 "$vm" wait
