@@ -424,18 +424,30 @@ fido2_devices() { systemd-cryptenroll --fido2-device=list 2>/dev/null | grep '^/
 # The console shells (inglenook-shell on the keyboard console,
 # inglenook-shell-serial on the serial one, when it runs) and the console
 # agent (systemd-ask-password-console) all read the console the FIDO2 prompt
-# lands on. The FIDO2 PIN prompt (ask-password, the same mechanism as
-# systemd-ask-password) reads one character at a time, with no line
-# buffering, so with a second reader around the keystrokes split between the
-# two and the PIN arrives garbled. Stop all of them for the duration of the
-# enrolment (the installer is the only reader while it waits, so
-# cryptenroll's own prompt works); the marker lets a crash restore them
-# through the EXIT trap.
+# lands on. The FIDO2 PIN prompt (ask-password) reads one character at a
+# time, so with a second reader around the keystrokes split between the two
+# and the PIN arrives garbled. Stop all of them for the duration of the
+# enrolment and start a replacement agent on this script's own TTY: the
+# console agent binds to /dev/console (the serial port when the addon is
+# active), which is the wrong terminal for a user on the keyboard. The
+# marker and pid file let a crash restore everything through the EXIT trap.
 fido2_console_takeover() {
   touch "$RUN/console-taken"
   systemctl stop inglenook-shell.service inglenook-shell-serial.service systemd-ask-password-console.service 2>/dev/null || true
+  # The console agent binds to /dev/console (the last console=, i.e. the
+  # serial port when the serial addon is active). If the user is on a
+  # different TTY, the PIN prompt would never reach them. Start a
+  # replacement on this script's own TTY (the agent's default: the current
+  # tty inherited from the shell).
+  systemd-tty-ask-password-agent --watch &
+  echo $! > "$RUN/ask-password-agent-pid"
 }
 fido2_console_restore() {
+  if [ -f "$RUN/ask-password-agent-pid" ]; then
+    kill "$(cat "$RUN/ask-password-agent-pid")" 2>/dev/null
+    wait 2>/dev/null
+    rm -f "$RUN/ask-password-agent-pid"
+  fi
   rm -f "$RUN/console-taken"
   systemctl start systemd-ask-password-console.service inglenook-shell.service inglenook-shell-serial.service 2>/dev/null || true
 }
