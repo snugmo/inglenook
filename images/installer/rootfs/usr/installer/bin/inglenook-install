@@ -30,7 +30,9 @@
 # Questions are skipped when their answer is in the environment (the tests do
 # that): INSTALL_DISK, INSTALL_ROOT_SIZE (50G), INSTALL_ENCRYPT (tpm2|none on
 # the tpm2 variant, luks|none on the no-tpm variant),
-# INSTALL_RECOVERY_KEY (1|0), INSTALL_CONSOLE (1|0: a serial console on the
+# INSTALL_RECOVERY_KEY (1|0), INSTALL_TPM2_PIN (yes|direct|0: protect the TPM
+# seal with a PIN, asked at every boot; the PIN itself is INSTALL_TPM2_PIN_VALUE
+# in unattended runs), INSTALL_CONSOLE (1|0: a serial console on the
 # installed system: the stick's UKI addon, copied to the system's ESP),
 # INSTALL_FIDO2 (1|0: enrol a FIDO2 security key to unlock the encrypted
 # volumes at boot: /var in both variants, the root on the no-tpm variant),
@@ -234,6 +236,33 @@ RECOVERY=
 if [ "$INSTALL_ENCRYPT" = tpm2 ] && [ -z "${INSTALL_RECOVERY_KEY:-}" ]; then
   yes_no "Create a recovery key (needed if the TPM is ever cleared or the board replaced)?" y && INSTALL_RECOVERY_KEY=1 || INSTALL_RECOVERY_KEY=0
 fi
+
+# The TPM2 PIN (the tpm2 variant, encrypted disk): a PIN bound to the TPM seal.
+# The TPM then refuses to release the key without it, so the PIN is asked at
+# every boot - a copy of the disk in hand cannot unlock it. The seal is re-
+# issued with the PIN in step 6; without a PIN the hands-off TPM seal repart
+# made stays. yes = argon2id hardening of the PIN (the recommended default);
+# direct = PBKDF2 (faster, for the impatient).
+TPM2_PIN=
+if [ "$INSTALL_ENCRYPT" = tpm2 ] && [ -z "${INSTALL_TPM2_PIN:-}" ]; then
+  printf '\n'
+  printf 'The TPM seal can be protected with a PIN: the TPM then refuses to release the key\n'
+  printf 'without it, so the PIN is asked at every boot - a copy of the disk alone cannot unlock\n'
+  printf 'it. Without a PIN the disk unlocks hands-off from the TPM alone.\n'
+  yes_no "Protect the disk with a TPM PIN?" n && INSTALL_TPM2_PIN=yes || INSTALL_TPM2_PIN=0
+fi
+case "${INSTALL_TPM2_PIN:-}" in
+  yes|direct)
+    if [ -z "${INSTALL_YES:-}" ]; then
+      read -rsp "  TPM PIN: " TPM2_PIN || die "no answer (end of input)"; printf '\n'
+      read -rsp "  TPM PIN again: " pin2 || die "no answer (end of input)"; printf '\n'
+      [ -n "$TPM2_PIN" ] && [ "$TPM2_PIN" = "$pin2" ] || die "The two TPM PINs differ (or are empty)."
+    else
+      TPM2_PIN=$INSTALL_TPM2_PIN_VALUE
+      [ -n "$TPM2_PIN" ] || die "INSTALL_TPM2_PIN is set but INSTALL_TPM2_PIN_VALUE is empty."
+    fi
+    ;;
+esac
 
 # A FIDO2 security key (a YubiKey ...) enrolled into the LUKS2 header of a volume
 # unlocks it at boot, next to the key the volume is sealed with: the boot path
@@ -468,15 +497,37 @@ if [ "$FIDO2_VOL" = 1 ]; then
   [ -n "$var_encrypt" ] && fido2_vols="${fido2_vols:+$fido2_vols }var"
   enroll_volumes_fido2 "$fido2_vols" || true
 fi
+# The recovery key (if asked for) is enrolled before the TPM PIN binding: the
+# enrolment unlocks the volume through the PIN-less TPM seal repart made, so it
+# needs no PIN. The recovery keyslot it adds is a plain password key, untouched
+# by the TPM2 wipe below, and is the fallback if the TPM is ever cleared.
+if [ "$INSTALL_ENCRYPT" = tpm2 ] && [ "${INSTALL_RECOVERY_KEY:-0}" = 1 ]; then
+  RECOVERY=$(systemd-cryptenroll --recovery-key --unlock-tpm2-device=auto "$ROOTPART" | tail -1)
+  printf '\n  RECOVERY KEY (write it down, it is shown again at the end):\n\n      %s\n\n' "$RECOVERY"
+fi
+# The TPM PIN (step 5): re-issue each TPM2 seal with a PIN-bound token. The
+# volume key is read through the existing PIN-less seal, a new keyslot and a
+# systemd-tpm2 token bound to the PIN are enrolled, then --wipe-slot=tpm2 drops
+# the PIN-less token and keeps the new one (and any FIDO2 or recovery keyslot).
+# The wipe can never leave a volume without a key (cryptenroll's own check).
+if [ -n "$TPM2_PIN" ]; then
+  say "Binding the disk to the TPM PIN"
+  for part in "$ROOTPART" /dev/disk/by-partlabel/var; do
+    NEWPIN="$TPM2_PIN" systemd-cryptenroll --tpm2-device=auto --tpm2-with-pin="$INSTALL_TPM2_PIN" \
+      --wipe-slot=tpm2 --unlock-tpm2-device=auto --unlock-headless "$part" >/dev/null
+  done
+fi
 rootdev=$ROOTPART
 case "$INSTALL_ENCRYPT" in
   tpm2)
-    systemd-cryptsetup attach root "$ROOTPART" - tpm2-device=auto,headless=yes
-    rootdev=/dev/mapper/root
-    if [ "${INSTALL_RECOVERY_KEY:-0}" = 1 ]; then
-      RECOVERY=$(systemd-cryptenroll --recovery-key --unlock-tpm2-device=auto "$ROOTPART" | tail -1)
-      printf '\n  RECOVERY KEY (write it down, it is shown again at the end):\n\n      %s\n\n' "$RECOVERY"
+    # The installer's own attach runs headless (no console prompt here); the
+    # PIN is handed through the environment the way a boot would get it.
+    if [ -n "$TPM2_PIN" ]; then
+      PIN="$TPM2_PIN" systemd-cryptsetup attach root "$ROOTPART" - tpm2-device=auto,headless=yes
+    else
+      systemd-cryptsetup attach root "$ROOTPART" - tpm2-device=auto,headless=yes
     fi
+    rootdev=/dev/mapper/root
     ;;
   luks)
     # no key material anywhere: the empty key slot answers the empty password
@@ -487,7 +538,13 @@ esac
 # /var is the scratch: its XFS holds the image and bootc's working files until
 # the install is done, then it is cleaned and starts as an empty /var.
 case "$var_encrypt" in
-  tpm2)    systemd-cryptsetup attach var /dev/disk/by-partlabel/var - tpm2-device=auto,headless=yes ;;
+  tpm2)
+    if [ -n "$TPM2_PIN" ]; then
+      PIN="$TPM2_PIN" systemd-cryptsetup attach var /dev/disk/by-partlabel/var - tpm2-device=auto,headless=yes
+    else
+      systemd-cryptsetup attach var /dev/disk/by-partlabel/var - tpm2-device=auto,headless=yes
+    fi
+    ;;
   key-file) systemd-cryptsetup attach var /dev/disk/by-partlabel/var - try-empty-password=true ;;
 esac
 mkdir -p /target /scratch
@@ -600,6 +657,11 @@ sync
 say "Installation complete."
 if [ -n "$RECOVERY" ]; then
   printf '\n  RECOVERY KEY for the encrypted root: %s\n  Keep it somewhere safe and off this machine.\n' "$RECOVERY"
+fi
+if [ -n "$TPM2_PIN" ]; then
+  printf '\n  The disk is bound to a TPM PIN: you will be asked for it at every boot.\n'
+  printf '  Losing it locks the disk (a recovery key or FIDO2 token, if you have one,\n'
+  printf '  is the way back). The PIN is not stored on the machine.\n'
 fi
 if [ -n "${FIDO2_ENROLLED:-}" ]; then
   printf '\n  A FIDO2 security key now unlocks %s at boot: insert (and touch) the key when\n' "$fido2_what"
