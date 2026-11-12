@@ -11,6 +11,12 @@ Before=initrd-root-fs.target
 [Service]
 Type=oneshot
 RemainAfterExit=yes
+# The script's systemd-cryptsetup child inherits this service's credential
+# directory, so a cryptsetup.tpm2-pin handed to the boot (SMBIOS, cmdline, the
+# loader) reaches its get_pin. Matches the root's systemd-cryptsetup@.service
+# drop-in (the mkosi-initrd credential.conf).
+ImportCredential=cryptsetup.*
+LoadCredential=cryptsetup.tpm2-pin
 # A service rather than a sysroot-var.mount unit: systemd tracks the bind mount
 # bootc already made at /sysroot/var, and skips a mount unit for that path.
 # The script also labels a not-yet-relabelled /var from the target tree's

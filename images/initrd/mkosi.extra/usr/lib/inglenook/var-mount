@@ -16,7 +16,12 @@ if [ ! -e /dev/disk/by-partlabel/var ]; then
   echo "inglenook: no var partition; /var stays on the root filesystem"
   exit 0
 fi
-systemd-cryptsetup attach var /dev/disk/by-partlabel/var - tpm2-device=auto,fido2-device=auto,try-empty-password=true,headless=yes || exit 1
+# No headless= : a volume sealed with a TPM PIN (the installer's option,
+# docs/encryption.md) answers its get_pin from the cryptsetup.tpm2-pin
+# credential (ImportCredential in the unit) or, absent that, from the
+# initrd's ask-password agent on the console. A PIN-less seal never prompts
+# (its token carries no USE_PIN), so this is a no-op for those.
+systemd-cryptsetup attach var /dev/disk/by-partlabel/var - tpm2-device=auto,fido2-device=auto,try-empty-password=true || exit 1
 mount -t xfs /dev/mapper/var /sysroot/var || exit 1
 if [ ! -e /sysroot/var/.inglenook-relabelled ]; then
   mkdir -p /sysroot/var/log/journal /sysroot/var/lib /sysroot/var/cache /sysroot/var/empty /sysroot/var/spool
