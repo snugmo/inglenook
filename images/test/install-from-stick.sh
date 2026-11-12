@@ -17,6 +17,9 @@
 # FIDO2=1 (answer the installer's FIDO2 question with 1; the installer VM has
 # no FIDO2 device, so this covers the no-key path: the installer polls briefly,
 # warns and continues, and the test checks that no token was enrolled),
+# TPM2_PIN=1 (ENCRYPT=tpm2 only: the installer binds the TPM seal to a PIN and
+# the installed boot gets the PIN as the cryptsetup.tpm2-pin credential (vm.sh's
+# VM_CREDENTIALS); the test checks the surviving tokens are bound to it),
 # RAM (installer VM memory, default 4G), KEY (ssh key to log into
 # the installed disk, default build/xfsvar/key; its public half is handed to
 # the VM, see vm.sh), STICK_REUSE=1 (keep the stick of the last run), WORK
@@ -35,6 +38,8 @@ export WORK=$IWORK
 OVMF=/usr/share/OVMF
 ENCRYPT=${ENCRYPT:-tpm2}
 [[ $ENCRYPT == tpm2 || $ENCRYPT == luks || $ENCRYPT == none ]] || { echo "ENCRYPT must be tpm2, luks or none (got '$ENCRYPT')" >&2; exit 1; }
+[[ ${TPM2_PIN:-0} != 1 || $ENCRYPT == tpm2 ]] || { echo "TPM2_PIN=1 needs ENCRYPT=tpm2 (the PIN protects the TPM seal)" >&2; exit 1; }
+TPM2_TESTPIN=test123   # the PIN the test binds (TPM2_PIN=1)
 RAM=${RAM:-4G}
 KEY=${KEY:-$REPO/build/xfsvar/key}
 [[ -f $KEY ]] || { mkdir -p "$(dirname "$KEY")"; ssh-keygen -q -t ed25519 -N '' -C inglenook-test -f "$KEY"; }
@@ -100,7 +105,7 @@ run 240 'echo 1 > /proc/sys/kernel/printk; for i in $(seq 60); do blkid -L INGLE
 shells_up() { run 20 'a=$(systemctl is-active inglenook-shell); b=$(systemctl is-active inglenook-shell-serial); [ $a = active ] && [ $b = active ] && echo up'; }
 shells_up | tail -1 | grep -qx up \
   && ok "the installer has a shell on the keyboard and the serial console" || bad "the installer's per-console shells are not both up"
-run 20 "(INSTALL_DISK=/dev/vda INSTALL_ROOT_SIZE=${ROOT_SIZE:-8G} INSTALL_ENCRYPT=$ENCRYPT INSTALL_RECOVERY_KEY=0 INSTALL_USER=alice INSTALL_TOKEN=1 INSTALL_REALNAME='Alice Example' INSTALL_USER_PASSWORD='correct horse battery' INSTALL_YES=1 INSTALL_NO_REBOOT=1${FIDO2:+ INSTALL_FIDO2=1}${INSTALL_DEBUG:+ INSTALL_DEBUG=1} setsid inglenook-install > /tmp/install.log 2>&1 &)" >/dev/null
+run 20 "(INSTALL_DISK=/dev/vda INSTALL_ROOT_SIZE=${ROOT_SIZE:-8G} INSTALL_ENCRYPT=$ENCRYPT INSTALL_RECOVERY_KEY=0 INSTALL_USER=alice INSTALL_TOKEN=1 INSTALL_REALNAME='Alice Example' INSTALL_USER_PASSWORD='correct horse battery' INSTALL_YES=1 INSTALL_NO_REBOOT=1${TPM2_PIN:+ INSTALL_TPM2_PIN=yes INSTALL_TPM2_PIN_VALUE=$TPM2_TESTPIN}${FIDO2:+ INSTALL_FIDO2=1}${INSTALL_DEBUG:+ INSTALL_DEBUG=1} setsid inglenook-install > /tmp/install.log 2>&1 &)" >/dev/null
 # The FIDO2 section stops the console shells while the key is enrolled (the
 # PIN prompt must not share the console); it leaves them running when no key
 # shows up. A serial command that lands in a dead shell never emits its end
@@ -154,6 +159,10 @@ cp "$KEY" "$B/key"; ssh-keygen -y -f "$B/key" > "$B/key.pub"; chmod 600 "$B/key"
 # The first-boot wizard of homed must run (it creates the user from the credential), so no
 # systemd.firstboot=no (the disk-encryption wizard is a no-op on an installed system).
 export VM_FIRSTBOOT=1 VM_CMDLINE="inglenook.tokenenroll=no"
+# A PIN-bound volume asks for the PIN at boot; on this unattended boot only the
+# credential can answer (the console agent would hang), so the boot reaching
+# ssh is itself the check that the PIN path works end to end.
+[[ ${TPM2_PIN:-0} == 1 ]] && export VM_CREDENTIALS="cryptsetup.tpm2-pin=$TPM2_TESTPIN"
 echo "boot: the installed disk alone"
 "$vm" start net
 "$vm" wait
@@ -190,6 +199,14 @@ if [[ ${FIDO2:-0} == 1 ]]; then
   check "no FIDO2 token in the root (no key was enrolled)" 'cryptsetup luksDump /dev/disk/by-partlabel/root 2>&1 | grep -c systemd-fido2' 0 ;;
   esac
   check "no FIDO2 token in /var (no key was enrolled)" 'cryptsetup luksDump /dev/disk/by-partlabel/var 2>&1 | grep -c systemd-fido2' 0
+fi
+if [[ ${TPM2_PIN:-0} == 1 ]]; then
+  # The installer re-issued each TPM2 seal bound to the PIN and wiped the
+  # PIN-less token (cryptenroll --wipe-slot=tpm2): the tpm2-pin flag of the
+  # surviving token says so, and the boot above could only have succeeded with
+  # the PIN from the credential.
+  check "the root's TPM2 token is bound to a PIN" 'cryptsetup luksDump /dev/disk/by-partlabel/root 2>&1 | grep -c "tpm2-pin: *true"' 1
+  check "the var volume's TPM2 token is bound to a PIN" 'cryptsetup luksDump /dev/disk/by-partlabel/var 2>&1 | grep -c "tpm2-pin: *true"' 1
 fi
 check "/var is the unlocked var volume" 'findmnt -rno SOURCE -t xfs /var' /dev/mapper/var
 check "/var is xfs" 'stat -f -c %T /var' xfs

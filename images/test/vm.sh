@@ -21,7 +21,9 @@
 # start: attach a software TPM 2.0, state in $WORK/tpm, kept between install and
 # start and wiped by a new install; tpm-setup.sh fetches swtpm), BLOCK_SETUP=tpm2-luks
 # (install: bootc --block-setup, needs TPM=1), VM_CMDLINE (start: extra kernel command line),
-# VM_FIRSTBOOT=1 (start: let the first-boot encryption wizard run; the tests skip it).
+# VM_FIRSTBOOT=1 (start: let the first-boot encryption wizard run; the tests skip it),
+# VM_CREDENTIALS (start: extra credentials, space-separated name=value pairs handed to
+# the boot as SMBIOS type 11; a unit's ImportCredential then picks them up).
 #
 # Debugging without a root login: VM_EXTRA_UNIT=path/to/x.service vm.sh start
 # injects that unit through the systemd.extra-unit.* credential (SMBIOS) and
@@ -210,6 +212,13 @@ cmd_start() {
   [[ -z ${VM_FIRSTBOOT:-} ]] && cmdline_extra="systemd.firstboot=no $cmdline_extra"
   [[ -n $cmdline_extra ]] && args+=(-smbios "type=11,value=io.systemd.stub.kernel-cmdline-extra=${cmdline_extra//,/,,}")
   [[ -f key.pub ]] && args+=(-smbios "type=11,value=io.systemd.credential:ssh.authorized_keys.root=$(cat key.pub)")
+  # VM_CREDENTIALS: extra credentials (e.g. the PIN of a PIN-bound volume);
+  # the boot's credential store carries them, and a unit's ImportCredential
+  # picks them up.
+  # shellcheck disable=SC2086 # intentional word splitting: the space-separated list
+  for c in ${VM_CREDENTIALS:-}; do
+    args+=(-smbios "type=11,value=io.systemd.credential:${c//,/,,}")
+  done
   # VM_QEMU_EXTRA: extra qemu arguments, word-split (e.g. a virtual smartcard
   # reader: "-device usb-ccid").
   # shellcheck disable=SC2206
