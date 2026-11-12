@@ -99,7 +99,8 @@ Boot the stick (the console shows a banner), then run `inglenook-install`. It:
    the rest of the disk becomes /var);
 4. asks how to encrypt, per the variant (above): TPM-sealed or plain on the tpm2 image,
    empty-slot LUKS or plain on the no-tpm image, with a recovery key offered for the
-   TPM-sealed root, and (below) whether a FIDO2 key should unlock the volumes too;
+   TPM-sealed root, a TPM PIN offered for the TPM seal (below), and (below) whether a
+   FIDO2 key should unlock the volumes too;
 5. asks for the **first user** (below), because root is locked and there is no other account, so
    without one nobody could log in;
 6. asks whether the installed system gets a **serial console** (default no): the stick's
@@ -130,7 +131,9 @@ Boot the stick (the console shows a banner), then run `inglenook-install`. It:
 
 Questions whose answer is in the environment are not asked (`INSTALL_DISK`,
 `INSTALL_ROOT_SIZE`, `INSTALL_ENCRYPT=tpm2|none` on the tpm2 variant, `luks|none` on the
-no-tpm one, `INSTALL_RECOVERY_KEY`, `INSTALL_FIDO2=1|0` (a security key for the
+no-tpm one, `INSTALL_RECOVERY_KEY`, `INSTALL_TPM2_PIN=yes|direct|0` (a PIN for
+the TPM seal, below; the value is in `INSTALL_TPM2_PIN_VALUE`),
+`INSTALL_FIDO2=1|0` (a security key for the
 encrypted volumes, below), `INSTALL_CONSOLE=1|0`, `INSTALL_USER`,
 `INSTALL_REALNAME`, `INSTALL_USER_PASSWORD`, `INSTALL_NO_USER=1`, `INSTALL_YES=1`
 (answers yes to every yes/no question, including the console one), `INSTALL_NO_REBOOT=1`,
@@ -205,6 +208,36 @@ make the key the *only* way to unlock a volume later, wipe the other keyslots
 from the booted system (docs/encryption.md). `INSTALL_FIDO2=1|0` answers the
 question; with `1` and no key in hand the installer warns and continues without
 it.
+
+## The TPM PIN (tpm2 variant)
+
+On the tpm2 image, for an encrypted root, the installer can also protect the
+TPM seal with a PIN (the question after the recovery key, step 4 above;
+`INSTALL_TPM2_PIN=yes|direct|0` answers it — `yes` = Argon2id hardening of the
+PIN, `direct` = PBKDF2 — and the value is in `INSTALL_TPM2_PIN_VALUE`). The
+TPM then refuses to release the volume key without the PIN, so a copy of the
+disk alone cannot unlock it and the PIN is asked at every boot. The PIN is
+written into no file on the machine; it is carried by the TPM's policy alone.
+
+Asked for, the installer binds it in step 7, while the volumes are still
+closed: for each volume it re-issues the TPM2 seal with the PIN — a
+`systemd-cryptenroll` that enrols a new keyslot bound to a PIN policy and
+wipes the PIN-less one (a FIDO2 token and the recovery keyslot survive the
+wipe; docs/encryption.md for the mechanism) — and opens the volumes for the
+install with the PIN in the `PIN` environment variable (the installer's own
+attach is headless, so there is no prompt channel by design). The finishing
+notice says the disk is bound to a TPM PIN and that losing it locks the disk
+(the recovery key or a FIDO2 token, if you have one, is the way back).
+
+At boot the PIN comes from a `cryptsetup.tpm2-pin` credential handed to the
+boot (SMBIOS on the test VMs, the kernel command line, or the loader's
+credentials directory on a machine), or, absent one, from the console through
+the initrd's ask-password agent (docs/encryption.md) — the root is prompted,
+then /var (the same PIN twice: ask-password's keyring cache is not consulted
+on this path). Forgetting it: the root falls back to the recovery key (if
+one was created); the tpm2 image's /var is TPM2-only, so a forgotten PIN
+without a FIDO2 token on /var leaves /var unbootable — the volume, not the
+system, is the loss.
 
 ## Tests
 

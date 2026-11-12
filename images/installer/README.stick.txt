@@ -13,8 +13,10 @@ you confirm it.
 3. A root shell appears on the screen (and on the serial console, if this
    drive has loader/addons/serial-console.addon.efi). Run:   inglenook-install
    It lists the disks, shows what is on the one you pick, asks for the size of
-   the root, whether to encrypt with the TPM, and the first user (root is locked,
-   so without a user nobody can log in), then installs.
+   the root, whether to encrypt with the TPM (and, if so, whether to protect
+   that seal with a PIN - asked at every boot; without it the disk unlocks
+   hands-off from the TPM alone), and the first user (root is locked, so
+   without a user nobody can log in), then installs.
 4. When it says the stick is no longer needed you can unplug it. When it
    finishes, unplug the stick and reboot.
 

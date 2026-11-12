@@ -2,8 +2,9 @@
 
 How the initrd unlocks the LUKS root, and what levers exist (and what are traps) for
 changing the options it passes to `systemd-cryptsetup`. Hard-won from reading the
-systemd 262 source and extracting the initrd; the no-TPM2 FIDO2 path at the bottom is
-built (the `no-tpm` image variant). Line references are to the v262 source tree.
+systemd 262 source and extracting the initrd; the no-TPM2 FIDO2 path (the `no-tpm`
+image variant) and the TPM2-with-PIN path (the tpm2 variant's installer) at the bottom
+are built. Line references are to the v262 source tree.
 
 ## The init in the initrd is systemd
 
@@ -291,3 +292,100 @@ the first user enrolls a token on the booted system
 slot 0 through the token (the empty slot is the one being wiped, so its own
 password cannot authorise the wipe — see the LUKS2 facts above). Every boot
 after that is token-gated; the boot configuration never changes.
+
+## TPM2 with a PIN (tpm2 variant)
+
+The installer can protect the TPM seal with a PIN (docs/installer.md): the TPM
+then refuses to release the volume key without it, so a copy of the disk alone
+cannot unlock it and the PIN is asked at every boot. It is offered only on the
+tpm2 variant, for an encrypted root, after the recovery key; the option values
+are `yes` (Argon2id hardening of the PIN, the recommended one) and `direct`
+(PBKDF2-HMAC-SHA256 with the token's salt, compatible with older systemd). The
+PIN is never written anywhere on the machine.
+
+**The PIN is bound after the volumes exist.** repart v262 has no
+`--tpm2-with-pin`, so the seal the installer's repart writes is PIN-less. The
+PIN is bound later, per volume, while the volumes are still closed (the
+installer's step 6, after the recovery key is enrolled — that enrolment
+unlocks through the PIN-less seal, which no longer exists after the wipe
+below):
+
+    NEWPIN=<pin> systemd-cryptenroll --tpm2-device=auto --tpm2-with-pin=yes \
+        --wipe-slot=tpm2 --unlock-tpm2-device=auto --unlock-headless <part>
+
+**The binding is a replacement, and the replacement is what makes it a
+gate.** The sealing policy incorporates the PIN as a *constant*
+`PolicyAuthValue` marker — the hash of the `TPM2_CC_PolicyAuthValue` command
+code, not of the PIN value (`tpm2_calculate_policy_auth_value`,
+tpm2-util.c:4890; the TPM side, `tpm2_policy_auth_value`) — so a PIN-bound
+token has a different policy hash than the PIN-less one with the same PCR
+set. The enrolment's `search_policy_hash` therefore does not find the existing
+token: it seals a *new* keyslot for the new seal, and `--wipe-slot=tpm2`
+deletes the PIN-less token and slot — `find_slots_by_mask` matches only TPM2
+tokens, so a FIDO2 token and the recovery keyslot are left alone, and the
+newly enrolled slot is kept (`wipe_except_slot`). The wipe is authorised with
+the volume key `--unlock-tpm2-device=auto` fetched through the PIN-less seal:
+no PIN is needed for the unlock, `$NEWPIN` feeds the new seal only. Keeping
+both seals would defeat the point: at boot the PIN-less token would be found
+first and would always win.
+
+**The root needs no new unit: the in-tree path already handles the PIN.** The
+measured-boot unit (gpt-auto; the tpm2 variant carries no drop-in) already has
+`tpm2-device=auto,tpm2-measure-pcr=yes,tpm2-measure-keyslot-nvpcr=yes` and no
+`headless=`. The measure flags force the in-tree path (above), which scans the
+header's TPM2 tokens in order (`find_tpm2_auto_data`) and takes each token's
+flags from its own JSON — the boolean `tpm2-pin` field cryptenroll writes — so
+a PIN-bound token prompts on its own; the attach `tpm2-pin=` option, which
+only forces the flag, is not needed. `get_pin()` (cryptsetup-tpm2.c) resolves
+the PIN in this order:
+
+1. the `$PIN` environment variable;
+2. the `cryptsetup.tpm2-pin` credential — the unit's drop-in
+   (`credential.conf`) already carries `ImportCredential=cryptsetup.*`, and a
+   boot can be handed the credential through SMBIOS type 11
+   (`io.systemd.credential:cryptsetup.tpm2-pin=…`, the test VMs' channel), the
+   kernel command line, or the loader's credentials directory;
+3. ask-password. In the initrd the service has no tty (no `StandardInput` in
+   the unit), so `ask_password_auto` (the flags are the unit's `headless=`,
+   i.e. none here) goes credential → agent: the request lands on
+   `/run/systemd/ask-password`. The keyring branch of `ask_password_auto` is
+   *not* consulted on this path (it is restricted to callers that set
+   `ASK_PASSWORD_NO_AGENT` and `ASK_PASSWORD_ACCEPT_CACHED`), so each
+   PIN-bound volume is prompted once — root first, then /var, the same PIN
+   twice — unless the credential is present. (The answers are stored in the
+   uid-0 keyring under `tpm2-pin` with a 2.5-minute expiry, a side effect
+   nothing in this flow reads; a wrong PIN re-asks through the same channel,
+   up to 5 times per volume, and the loop clears `ASK_PASSWORD_ACCEPT_CACHED`
+   after the first ask so a cached wrong answer is never retried.)
+
+The agent needs a running watcher, and the initrd has none (the preset
+disables everything; the stock `systemd-ask-password-console.service` has no
+`[Install]` section and is normally pulled by its `.path`, a main-system
+thing), so the image carries its own: `inglenook-ask-password.service`,
+initrd-scoped (`ConditionPathExists=/etc/initrd-release`, stops at
+switch-root), which runs `systemd-tty-ask-password-agent --watch --console`
+and serves any ask-password request on the console. With a credential present
+it is never invoked, so it is inert on boots that pass their secrets that
+way; without one, it is the difference between a prompt and a hang (the agent
+path creates the socket and waits forever for an answer nobody serves). On
+the booted system the volumes are already active (the attach short-circuits,
+above), so the PIN is never asked there.
+
+**/var needed two changes.** The initrd's `var-mount` attached the volume with
+`headless=`, which makes `get_pin` refuse to prompt (`ENOPKG`, after the
+`$PIN` check); that flag is gone, and the service imports the
+`cryptsetup.*` credentials the way the root's unit does (the mkosi-initrd
+`credential.conf` covers the root). A PIN-less /var seal carries no
+`USE_PIN`, so it never prompts — both changes are no-ops for those.
+
+**What a forgotten PIN costs.** Five wrong PINs (or no answer) turns the
+TPM2 method into `-EAGAIN` ("TPM2 PIN unlock failed, falling back to
+traditional unlocking."), and the attach loop continues: the root (a recovery
+keyslot, if one was created) ends at the passphrase prompt, answered by the
+same console agent. The tpm2 image's /var is TPM2-only (no empty keyslot, no
+recovery keyslot — the recovery key is enrolled into the root only), so a
+forgotten PIN without a FIDO2 token on /var leaves it unbootable: the prompt
+times out, the /var service fails, there is no switch-root, the root's
+content is intact, and the volume is the loss. That is what the installer's
+finishing notice points at (the recovery key for the root, a FIDO2 token for
+/var, "if you have one").
