@@ -73,6 +73,28 @@ own console output goes to the last `console=` only, so with the addon the boot
 messages are on the serial; the two consoles show different things and that is
 by design.)
 
+## Making the USB drive
+
+`images/installer/stick.sh <image-ref>` writes `build/installer/stick.img`, a complete
+raw disk image (5 GiB: a GPT with one FAT32 partition) that is written byte for byte
+to the drive:
+
+```
+sudo dd if=build/installer/stick.img of=/dev/sdX bs=4M conv=fsync
+```
+
+`/dev/sdX` is the whole drive (check with `lsblk`; the dd erases everything on it),
+and the drive must be at least 5 GiB (anything larger just leaves an unused tail).
+`sync` when dd says done, then pull it out. The tree alone can also be copied onto
+any FAT32 drive (`build/installer/tree`, mtools or a mounted volume) — the firmware
+boots the ESP's fallback path from any FAT partition — but the stick image is the
+tested shape.
+
+The drive is then used as described in [Using it](#using-it): Secure Boot off, boot
+it, `inglenook-install` (the banner on the console points to it). A machine without
+a TPM gets the plain-root options of the tpm2 image; with a TPM, the sealed root
+(and the optional PIN, [below](#the-tpm-pin-tpm2-variant)).
+
 ## The two image variants
 
 Both images carry the whole installer; they differ in what an encrypted root means and
