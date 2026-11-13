@@ -18,8 +18,10 @@
 # no FIDO2 device, so this covers the no-key path: the installer polls briefly,
 # warns and continues, and the test checks that no token was enrolled),
 # TPM2_PIN=1 (ENCRYPT=tpm2 only: the installer binds the TPM seal to a PIN and
-# the installed boot gets the PIN as the cryptsetup.tpm2-pin credential (vm.sh's
-# VM_CREDENTIALS); the test checks the surviving tokens are bound to it),
+# the installed boot gets the PIN as the cryptsetup.tpm2-pin credential
+# (vm.sh's VM_CREDENTIALS), on a forced-measured boot (a real machine's measured
+# UKI is what makes cryptsetup read that credential, see the boot phase); the
+# test checks the surviving tokens are bound to it),
 # RAM (installer VM memory, default 4G), KEY (ssh key to log into
 # the installed disk, default build/xfsvar/key; its public half is handed to
 # the VM, see vm.sh), STICK_REUSE=1 (keep the stick of the last run), WORK
@@ -158,11 +160,22 @@ mv "$IWORK/target.img" "$B/target.img"
 cp "$KEY" "$B/key"; ssh-keygen -y -f "$B/key" > "$B/key.pub"; chmod 600 "$B/key"
 # The first-boot wizard of homed must run (it creates the user from the credential), so no
 # systemd.firstboot=no (the disk-encryption wizard is a no-op on an installed system).
-export VM_FIRSTBOOT=1 VM_CMDLINE="inglenook.tokenenroll=no"
+VM_CMDLINE="inglenook.tokenenroll=no"
 # A PIN-bound volume asks for the PIN at boot; on this unattended boot only the
 # credential can answer (the console agent would hang), so the boot reaching
 # ssh is itself the check that the PIN path works end to end.
-[[ ${TPM2_PIN:-0} == 1 ]] && export VM_CREDENTIALS="cryptsetup.tpm2-pin=$TPM2_TESTPIN"
+# A real machine boots the measured UKI (sd-stub measures it into PCR 11), so
+# efi_measured_os() is true there and the boot takes the explicit TPM2 path
+# (gpt-auto-generator adds tpm2-device=auto only when measured; otherwise
+# cryptsetup falls back to the generic LUKS2 token scan, which reads a
+# different credential, cryptsetup.luks2-pin). The test VM's OVMF has Secure
+# Boot off, so sd-stub does not measure; systemd.tpm2_measured_os= is the
+# explicit override that forces the measured path the credential speaks.
+if [[ ${TPM2_PIN:-0} == 1 ]]; then
+  export VM_CREDENTIALS="cryptsetup.tpm2-pin=$TPM2_TESTPIN"
+  VM_CMDLINE="$VM_CMDLINE systemd.tpm2_measured_os=1"
+fi
+export VM_FIRSTBOOT=1 VM_CMDLINE
 echo "boot: the installed disk alone"
 "$vm" start net
 "$vm" wait
