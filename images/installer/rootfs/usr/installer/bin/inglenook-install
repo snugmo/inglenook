@@ -522,11 +522,13 @@ fi
 # systemd-tpm2 token bound to the PIN are enrolled, then --wipe-slot=tpm2 drops
 # the PIN-less token and keeps the new one (and any FIDO2 or recovery keyslot).
 # The wipe can never leave a volume without a key (cryptenroll's own check).
+# One unlock method per invocation: --unlock-tpm2-device=auto is it (a second
+# one, e.g. --unlock-headless, is refused: "Multiple unlock methods").
 if [ -n "$TPM2_PIN" ]; then
   say "Binding the disk to the TPM PIN"
   for part in "$ROOTPART" /dev/disk/by-partlabel/var; do
     NEWPIN="$TPM2_PIN" systemd-cryptenroll --tpm2-device=auto --tpm2-with-pin="$INSTALL_TPM2_PIN" \
-      --wipe-slot=tpm2 --unlock-tpm2-device=auto --unlock-headless "$part" >/dev/null
+      --wipe-slot=tpm2 --unlock-tpm2-device=auto "$part" >/dev/null
   done
 fi
 rootdev=$ROOTPART
