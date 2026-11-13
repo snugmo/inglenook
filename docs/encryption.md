@@ -311,7 +311,18 @@ unlocks through the PIN-less seal, which no longer exists after the wipe
 below):
 
     NEWPIN=<pin> systemd-cryptenroll --tpm2-device=auto --tpm2-with-pin=yes \
-        --wipe-slot=tpm2 --unlock-tpm2-device=auto --unlock-headless <part>
+        --wipe-slot=tpm2 --tpm2-public-key= --unlock-tpm2-device=auto <part>
+
+The empty `--tpm2-public-key=` stops cryptenroll's default loading of the UKI's
+signed PCR 11 public key (systemd-stub copies it from the UKI's `.pcrpkey` into
+`/run/systemd/tpm2-pcr-public-key.pem`, where v262's auto-load finds it). Without
+it the new token would be bound to the key and PCR 11 and would need the boot's
+PCR signature JSON to unseal — a non-measured boot (the test VM's) never has a
+matching signature, and the attach fails before the PIN is even asked. The seal
+stays PCR-less, the way the installer's `systemd-repart --tpm2-public-key-pcrs=`
+made it; a PCR policy for the PIN-bound token is a later step (docs/bootc.md).
+One unlock method per invocation: `--unlock-tpm2-device=auto` is it; a second
+(`--unlock-headless`) is refused.
 
 **The binding is a replacement, and the replacement is what makes it a
 gate.** The sealing policy incorporates the PIN as a *constant*

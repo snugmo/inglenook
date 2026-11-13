@@ -524,11 +524,17 @@ fi
 # The wipe can never leave a volume without a key (cryptenroll's own check).
 # One unlock method per invocation: --unlock-tpm2-device=auto is it (a second
 # one, e.g. --unlock-headless, is refused: "Multiple unlock methods").
+# --tpm2-public-key= (empty) stops cryptenroll's default loading of the UKI's
+# signed PCR 11 public key, which systemd-stub copied from the stick's UKI
+# into /run/systemd: without it the new token would be bound to the key and
+# to PCR 11 and would need the boot's PCR signature JSON to unseal, which a
+# non-measured boot (the test VM's) never has. The seal stays PCR-less, the
+# way repart made it.
 if [ -n "$TPM2_PIN" ]; then
   say "Binding the disk to the TPM PIN"
   for part in "$ROOTPART" /dev/disk/by-partlabel/var; do
     NEWPIN="$TPM2_PIN" systemd-cryptenroll --tpm2-device=auto --tpm2-with-pin="$INSTALL_TPM2_PIN" \
-      --wipe-slot=tpm2 --unlock-tpm2-device=auto "$part" >/dev/null
+      --wipe-slot=tpm2 --tpm2-public-key= --unlock-tpm2-device=auto "$part" >/dev/null
   done
 fi
 rootdev=$ROOTPART
