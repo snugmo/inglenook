@@ -16,12 +16,31 @@ if [ ! -e /dev/disk/by-partlabel/var ]; then
   echo "inglenook: no var partition; /var stays on the root filesystem"
   exit 0
 fi
+# The options depend on the TPM, like the installer (var-repart). A volume
+# sealed to the TPM must go through the in-tree TPM2 path, not cryptsetup's
+# generic LUKS2 token scan: that one asks its PIN for a credential named
+# cryptsetup.luks2-pin, which a boot never provides (the in-tree path asks
+# for cryptsetup.tpm2-pin, the unit's ImportCredential delivers it), and for
+# a PIN-bound token the TPM2 plugin refuses to run without a PIN (-ENOANO),
+# so the ask-password agent hangs on "Please enter LUKS2 token PIN:"
+# (docs/encryption.md). The measurement flags turn the scan off (matching
+# gpt-auto's root unit); they are inert for the seal itself (the token was
+# enrolled PCR-less), and a PIN-less seal never prompts (no USE_PIN).
 # No headless= : a volume sealed with a TPM PIN (the installer's option,
 # docs/encryption.md) answers its get_pin from the cryptsetup.tpm2-pin
 # credential (ImportCredential in the unit) or, absent that, from the
-# initrd's ask-password agent on the console. A PIN-less seal never prompts
-# (its token carries no USE_PIN), so this is a no-op for those.
-systemd-cryptsetup attach var /dev/disk/by-partlabel/var - tpm2-device=auto,fido2-device=auto,try-empty-password=true || exit 1
+# initrd's ask-password agent on the console.
+if [ -c /dev/tpmrm0 ]; then
+  options='tpm2-device=auto,tpm2-measure-pcr=yes,tpm2-measure-keyslot-nvpcr=yes,fido2-device=auto,try-empty-password=true'
+else
+  # No TPM: /var is LUKS2 with an empty key slot (the no-tpm variant, or a
+  # disk provisioned without a TPM), unlocked by try-empty-password, with an
+  # optional FIDO2 token. No TPM2 options and no measurement flags: they
+  # would push FIDO2 to the in-tree path, which fails a no-token volume (the
+  # no-tpm root's drop-in, same reason).
+  options='fido2-device=auto,try-empty-password=true'
+fi
+systemd-cryptsetup attach var /dev/disk/by-partlabel/var - "$options" || exit 1
 mount -t xfs /dev/mapper/var /sysroot/var || exit 1
 if [ ! -e /sysroot/var/.inglenook-relabelled ]; then
   mkdir -p /sysroot/var/log/journal /sysroot/var/lib /sysroot/var/cache /sysroot/var/empty /sysroot/var/spool

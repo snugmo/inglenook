@@ -88,6 +88,19 @@ Unlock order in `attach`: (1) a token — PKCS#11, FIDO2 or TPM2; (2) the config
 discovered key; (3) the **empty password, only if** `try-empty-password=` is in the
 options (a crypttab option since v246); (4) prompt the user.
 
+- **Before that order, the generic token scan.** Unless the measurement flags (or
+  `fixate-volume-key`) are in the options, `use_token_plugins()` (cryptsetup.c:1406) is
+  true and `attach` first runs the generic LUKS2 token scan (cryptsetup.c:2599): it tries
+  the installed token plugins and, for a PIN-protected one, asks for the PIN under a
+  credential named `cryptsetup.luks2-pin` (cryptsetup.c:2607). The scan runs ahead of
+  whatever explicit method the options select, so `tpm2-device=auto` alone does *not*
+  route the TPM2 PIN to the in-tree path's `cryptsetup.tpm2-pin` — a PIN-bound token
+  reaches the scan first, the TPM2 plugin refuses to run without a PIN (`-ENOANO`,
+  luks2-tpm2.c:60), and the scan asks for a credential no boot provides. The measurement
+  flags turn the scan off; that is why a PIN-bound root (its gpt-auto unit always carries
+  them on a measured boot) unseals, while the unmeasured `var-mount` options hung
+  (TPM2 with a PIN, below). A PIN-*less* token unseals in the scan (no `USE_PIN`), which
+  is why the no-PIN boots never hit this.
 - **FIDO2 is opt-in**: it needs `fido2-device=auto` in the options. It is not
   auto-detected even when a token is plugged in and a FIDO2 token is enrolled in the
   LUKS header.
@@ -382,12 +395,23 @@ path creates the socket and waits forever for an answer nobody serves). On
 the booted system the volumes are already active (the attach short-circuits,
 above), so the PIN is never asked there.
 
-**/var needed two changes.** The initrd's `var-mount` attached the volume with
-`headless=`, which makes `get_pin` refuse to prompt (`ENOPKG`, after the
-`$PIN` check); that flag is gone, and the service imports the
+**/var needed three changes.** [1] The initrd's `var-mount` attached the
+volume with `headless=`, which makes `get_pin` refuse to prompt (`ENOPKG`,
+after the `$PIN` check); that flag is gone. [2] The service imports the
 `cryptsetup.*` credentials the way the root's unit does (the mkosi-initrd
-`credential.conf` covers the root). A PIN-less /var seal carries no
-`USE_PIN`, so it never prompts — both changes are no-ops for those.
+`credential.conf` covers the root). [3] The attach options carry the
+measurement flags (`tpm2-measure-pcr=yes,tpm2-measure-keyslot-nvpcr=yes`,
+the gpt-auto root's) whenever a TPM is present — `var-mount` branches on
+`/dev/tpmrm0`, like the installer does. Without them the generic token
+scan (above) runs first, asks for `cryptsetup.luks2-pin` — a credential a
+boot never provides — and hangs the ask-password agent on the PIN-bound
+token; the flags turn the scan off and let the in-tree path ask for
+`cryptsetup.tpm2-pin`. The flags are inert for the seal itself (the token
+was enrolled PCR-less), and a PIN-less /var seal carries no `USE_PIN`, so
+it never prompts on either path. Without a TPM the branch keeps the old
+options: the volume is LUKS2 with an empty key slot, and the flags would
+push FIDO2 to the in-tree path that fails a no-token volume (the no-tpm
+root's drop-in, same reason).
 
 **What a forgotten PIN costs.** Five wrong PINs (or no answer) turns the
 TPM2 method into `-EAGAIN` ("TPM2 PIN unlock failed, falling back to
