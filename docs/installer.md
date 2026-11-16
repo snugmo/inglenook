@@ -52,39 +52,35 @@ The **serial-console addon** (`images/addons/serial-console.sh`, a `ukify build`
 deliberately has no `console=` argument (`console=ttyS0` on a machine without a UART
 starts a serial getty that fails and restarts every 10 seconds), and a locked-down
 (Secure Boot, type-2) UKI accepts no other kernel arguments — so a serial console, on
-the stick or on an installed system, comes from this file on the ESP: the stub
-appends the addon's cmdline to the UKI's. `console=` only selects which consoles are
-shown and grants no privilege, which is what makes it safe in that role (a locked-down
-system needs the addon signed like the UKI; here it is unsigned, with Secure Boot off).
-The addon's boot is what the tests read on the serial. The installer runs one root
-shell per console: `inglenook-shell` on the keyboard console and `inglenook-shell-serial`
-on the serial, each starting whenever its tty node exists (`/dev/tty0` and
-`/dev/ttyS0`). That is the point of the split - a shell on every terminal the user
-could be on, whichever input method they choose - and it is deliberately *not* gated
-on the addon: the addon only redirects the kernel's *console output* to the port, it
-is not what opens the shell (a `ConditionKernelCommandLine` gate would also be the
-wrong tool: systemd matches that directive against whole words and whole
-`key=value` assignments, never against a glob). The target `Wants` both shells
-rather than requiring them, so a console that cannot be opened never blocks the boot
-target. Each unit binds its tty explicitly (`TTYPath=`): `/dev/console` is the *last*
-`console=`, so a single shell on it would leave the screen without a shell the moment
-the addon selects the serial console, which is what this split fixes. (The kernel's
-own console output goes to the last `console=` only, so with the addon the boot
-messages are on the serial; the two consoles show different things and that is
-by design.)
+the stick or on an installed system, comes from this file on the ESP: systemd-stub
+appends the addon's cmdline to the UKI's, and `console=` only selects consoles,
+granting no privilege, which is what makes that safe (the addon is unsigned, like
+the image's UKI). The addon's boot is what the tests read on the serial. The
+installer runs one root shell per console — `inglenook-shell` on `/dev/tty0`,
+`inglenook-shell-serial` on `/dev/ttyS0`, each starting whenever its tty node exists
+and bound to it with `TTYPath=`: a shell on `/dev/console` alone would lose the
+screen the moment the addon selects the serial (it is the *last* `console=`). The
+serial shell is gated on the node, not on the addon (the addon only redirects the
+kernel's console output; `ConditionKernelCommandLine` would be the wrong tool —
+it matches whole words and whole `key=value` assignments, never a glob). The
+target `Wants` both shells rather than requiring them, so a console that cannot
+be opened never blocks the boot target. With the addon the kernel's own output
+goes to the serial only: the two consoles show different things, by design (the
+units' comments carry the full reasoning).
 
 ## Making the USB drive
 
 `images/installer/stick.sh <image-ref>` writes `build/installer/stick.img`, a complete
-raw disk image (5 GiB: a GPT with one FAT32 partition) that is written byte for byte
-to the drive:
+raw disk image (a GPT with one FAT32 partition, sized to the image content plus 300 MiB
+in whole GiB — 5 GiB today; `STICK_SIZE=` and `PTYPE=` override) that is written byte
+for byte to the drive:
 
 ```
 sudo dd if=build/installer/stick.img of=/dev/sdX bs=4M conv=fsync
 ```
 
-`/dev/sdX` is the whole drive (check with `lsblk`; the dd erases everything on it),
-and the drive must be at least 5 GiB (anything larger just leaves an unused tail).
+`/dev/sdX` is the whole drive (check with `lsblk`; the dd erases everything on it) and
+must be at least as big as the image (anything larger just leaves an unused tail).
 `sync` when dd says done, then pull it out. The tree alone can also be copied onto
 any FAT32 drive (`build/installer/tree`, mtools or a mounted volume) — the firmware
 boots the ESP's fallback path from any FAT partition — but the stick image is the
@@ -156,7 +152,8 @@ Questions whose answer is in the environment are not asked (`INSTALL_DISK`,
 no-tpm one, `INSTALL_RECOVERY_KEY`, `INSTALL_TPM2_PIN=yes|direct|0` (a PIN for
 the TPM seal, below; the value is in `INSTALL_TPM2_PIN_VALUE`),
 `INSTALL_FIDO2=1|0` (a security key for the
-encrypted volumes, below), `INSTALL_CONSOLE=1|0`, `INSTALL_USER`,
+encrypted volumes, below), `INSTALL_TOKEN=1|0` (a FIDO2 key for the first
+user, enrolled at the first boot, below), `INSTALL_CONSOLE=1|0`, `INSTALL_USER`,
 `INSTALL_REALNAME`, `INSTALL_USER_PASSWORD`, `INSTALL_NO_USER=1`, `INSTALL_YES=1`
 (answers yes to every yes/no question, including the console one), `INSTALL_NO_REBOOT=1`,
 `INSTALL_TARGET_IMGREF`, `INSTALL_IMAGE_DIR`); the tests use that.
@@ -175,16 +172,18 @@ systemd-homed account:
   encrypted volume, mode 0600, SELinux-labeled with `setfiles` like the initrd does). The record is in
   the `wheel` group (so `run0` works), has `/bin/bash` as shell, and holds the password hash plus the
   password itself in its `secret` section: homed needs the secret to create the home.
-- **On the first boot:** `systemd-homed-firstboot.service` (enabled in the image, drop-in
-  `10-inglenook.conf`) runs `homectl firstboot`, which creates the account from the credential without
-  asking, and the drop-in deletes the credential afterwards. The unit does not use
-  `ConditionFirstBoot=`: the image ships an empty `/etc/machine-id`, which systemd treats as "not a first
-  boot" (machine-id(5)) — though a stick install no longer relies on that: it writes the machine id
-  itself, and the homed wizard runs while homed simply has no regular user yet. The home is a plain
-  directory when the root is encrypted (it already is), homed's default (a LUKS image) when it is not.
-- **Skipped in the installer:** the same service prompts on the console on the first boot (username and
-  password; the account joins `wheel`). Nothing is stored anywhere before that. To add users later from an
-  existing login: `homectl create <name> --member-of=wheel`.
+- **On the first boot:** `systemd-homed-firstboot.service` (enabled in the image) runs
+  `homectl firstboot`, which creates the account from the credential without asking, and the drop-in
+  (`10-inglenook.conf`) deletes the `home.create.*` file afterwards. The drop-in clears
+  `ConditionFirstBoot=` — on an installed system the machine id is already initialized on the first
+  real boot (the installer wrote it), so the condition is never true; clearing it also keeps
+  `systemd-firstboot.service`, which would prompt for a root password, from ever running — and
+  instead runs when no user record exists (an `ExecCondition` on the `*.identity` files in
+  `/var/lib/systemd/home` — not "the directory is empty": homed keeps its signing keys there).
+  Without a credential (an install that skipped the first user) it prompts on the console for one
+  (username and password; the account joins `wheel`). To add users later from an existing login:
+  `homectl create <name> --member-of=wheel`. The home is a plain directory when the root is
+  encrypted (it already is), homed's default (a LUKS image) when it is not.
 - The installer also appends `<name>:524288:65536` to `/etc/subuid` and `/etc/subgid` (rootless podman).
 - Without disk encryption the password sits on the unencrypted disk in `/etc/credstore` until the first
   boot deletes the file (and stays recoverable from free space); the installer warns about that.
@@ -199,12 +198,12 @@ exist and are still closed: the installer waits for the key — a short poll whe
 unattended (`INSTALL_YES=1`), until it is inserted or `skip` is typed otherwise —
 and runs `systemd-cryptenroll --fido2-device=auto` on each volume it is offered
 for: `--unlock-tpm2-device=auto` on the TPM-sealed /var, `--unlock-empty` on the
-empty-key volumes. The key's PIN, when it has one, is asked through
-ask-password on the console; that prompt reads the console one character at a
-time, so the installer stops the console shells (both of them) and the console
-agent before it asks (the keystrokes would otherwise split between them) and
-starts them again after the enrolment - unattended, only when a key actually
-shows up, so an install without one keeps the consoles up the whole time.
+empty-key volumes. The key's PIN, when it has one, is asked through ask-password (keystrokes
+would split between readers), so the installer stops the console shells and
+agent and starts a replacement agent on the script's own TTY (the default
+binds to /dev/console — with the serial addon, the serial port); the services
+come back after the enrolment - unattended, only when a key actually shows up,
+so an install without one keeps the consoles up the whole time.
 
 What the key ends up unlocking is fixed by the boot path, so the installer only
 offers it where the boot path would actually try it:
@@ -214,52 +213,41 @@ offers it where the boot path would actually try it:
 | root | never (a TPM-sealed root boots from the TPM only: gpt-auto's generated unit carries no FIDO2 option, and a static drop-in cannot add one safely — docs/encryption.md) | the empty-key root (the variant's initrd drop-in tries `fido2-device=auto`) |
 | /var | yes (the initrd's /var unlock already tries `fido2-device=auto`) | yes |
 
-Each enrolment writes one `systemd-fido2` token into the volume's 1 MiB JSON
-LUKS2 header and adds one new keyslot the token's secret unlocks (the volume
-key, keyed by a base64-encoded value only the key can reconstruct — the
-mechanism all LUKS2 tokens use, docs/encryption.md): the existing keys (the
-TPM seal, or the empty key) are untouched and keep working. What that means at
-boot depends on how the volume was sealed: a TPM-sealed /var still unlocks from
-the TPM first, so a boot without the key still boots, with no delay (the key is
-the fallback for a lost TPM); a volume with only the empty key — the no-tpm
-image, or /var on the tpm2 image when there is no TPM — boots without the key
-too: the initrd waits up to 30 s for the key per volume, the wait times out,
-and the empty key unlocks (docs/encryption.md), so the key is a fast path
-rather than a gate. To
-make the key the *only* way to unlock a volume later, wipe the other keyslots
-from the booted system (docs/encryption.md). `INSTALL_FIDO2=1|0` answers the
-question; with `1` and no key in hand the installer warns and continues without
-it.
+Each enrolment adds one `systemd-fido2` token and one keyslot to the volume's
+1 MiB JSON header (docs/encryption.md for the mechanism); the existing keys
+(the TPM seal, or the empty key) are untouched and keep working, so the key is
+a fast path rather than a gate: a TPM-sealed /var still unlocks from the TPM
+first (no delay without the key; the key is the fallback for a lost TPM), and
+an empty-key volume (the no-tpm root, or /var on a TPM-less machine) boots
+without the key too: the initrd waits up to 30 s per volume and then the
+empty key unlocks (docs/encryption.md). To make the key the *only* way to
+unlock a volume later,
+wipe the other keyslots from the booted system (docs/encryption.md).
+`INSTALL_FIDO2=1|0` answers the question; with `1` and no key in hand the
+installer warns and continues without it.
 
 ## The TPM PIN (tpm2 variant)
 
-On the tpm2 image, for an encrypted root, the installer can also protect the
-TPM seal with a PIN (the question after the recovery key, step 4 above;
-`INSTALL_TPM2_PIN=yes|direct|0` answers it — `yes` = Argon2id hardening of the
-PIN, `direct` = PBKDF2 — and the value is in `INSTALL_TPM2_PIN_VALUE`). The
-TPM then refuses to release the volume key without the PIN, so a copy of the
-disk alone cannot unlock it and the PIN is asked at every boot. The PIN is
-written into no file on the machine; it is carried by the TPM's policy alone.
+On the tpm2 image, for an encrypted root, the installer can protect the TPM
+seal with a PIN (the question after the recovery key, step 4 above;
+`INSTALL_TPM2_PIN=yes|direct|0` answers it — `yes` = Argon2id, `direct` =
+PBKDF2 — the value is in `INSTALL_TPM2_PIN_VALUE`): the TPM then refuses to
+release the volume key without the PIN, so a copy of the disk alone cannot
+unlock it and the PIN is asked at every boot. The PIN is written into no file
+on the machine; it is carried by the TPM's policy alone.
 
 Asked for, the installer binds it in step 7, while the volumes are still
-closed: for each volume it re-issues the TPM2 seal with the PIN — a
-`systemd-cryptenroll` that enrols a new keyslot bound to a PIN policy and
-wipes the PIN-less one (a FIDO2 token and the recovery keyslot survive the
-wipe; docs/encryption.md for the mechanism) — and opens the volumes for the
-install with the PIN in the `PIN` environment variable (the installer's own
-attach is headless, so there is no prompt channel by design). The finishing
-notice says the disk is bound to a TPM PIN and that losing it locks the disk
-(the recovery key or a FIDO2 token, if you have one, is the way back).
-
-At boot the PIN comes from a `cryptsetup.tpm2-pin` credential handed to the
-boot (SMBIOS on the test VMs, the kernel command line, or the loader's
-credentials directory on a machine), or, absent one, from the console through
-the initrd's ask-password agent (docs/encryption.md) — the root is prompted,
-then /var (the same PIN twice: ask-password's keyring cache is not consulted
-on this path). Forgetting it: the root falls back to the recovery key (if
-one was created); the tpm2 image's /var is TPM2-only, so a forgotten PIN
-without a FIDO2 token on /var leaves /var unbootable — the volume, not the
-system, is the loss.
+closed: per volume it re-issues the TPM2 seal with the PIN (a FIDO2 token and
+the recovery keyslot survive the wipe) and opens the volumes with the PIN in
+the `PIN` environment variable (its own attach is headless — no prompt
+channel by design). The finishing notice points at what a lost PIN costs.
+The mechanism (the binding is a replacement; the seal stays PCR-less) and
+the boot side (the `cryptsetup.tpm2-pin` credential or the initrd's
+ask-password agent: root first, then /var, the same PIN twice) are in
+docs/encryption.md, with the cost of a forgotten PIN: the root falls back
+to the recovery key (if one was created), but the tpm2 image's /var is
+TPM2-only, so a forgotten PIN without a FIDO2 token on /var leaves it
+unbootable — the volume, not the system, is the loss.
 
 ## Tests
 
@@ -268,27 +256,23 @@ system, is the loss.
   installer tool runs.
 - `images/test/install-from-stick.sh`: the whole install onto a disk that holds old data, a first
   user, the stick pulled over QMP as soon as it is no longer needed, then the disk booted
-  alone: a shell is up on each console (keyboard, and serial while the stick's addon is on
-  it) before and after the FIDO2 section; the root and /var volumes are in the state the chosen `ENCRYPT=tpm2|luks|none`
-  promises (TPM2 token, empty slot, or plain), /var is XFS, the serial-console addon
-  is on the ESP (the console question is auto-answered by `INSTALL_YES=1`), the
-  account exists, is in `wheel`, takes the password and not a wrong one, and the
-  credential is gone. `luks`
-  needs a stick made from the no-tpm image variant (the tpm2 installer refuses it), and
-  that run also exercises the variant's FIDO2/empty-slot root unlock drop-in
-  (docs/encryption.md), since the installed disk boots without a TPM. With
-  `FIDO2=1` the installer's FIDO2 question is answered yes but no key is present: it
-  warns and continues, and the test checks that nothing was enrolled.
+  alone: a shell on each console before and after the FIDO2 section (serial while the
+  stick's addon is on it); root and /var in the state the chosen `ENCRYPT=tpm2|luks|none`
+  promises (TPM2 token, empty slot, or plain), /var is XFS, the serial-console addon on
+  the ESP (auto-answered by `INSTALL_YES=1`), the account in `wheel` takes the password
+  and not a wrong one, and the credential is gone. `luks` needs the no-tpm stick (the
+  tpm2 installer refuses it); that run also exercises the variant's
+  FIDO2/empty-slot root unlock drop-in (docs/encryption.md), since the installed disk
+  boots without a TPM. With `FIDO2=1` the question is answered yes but no key is
+  present: it warns and continues, and the test checks that nothing was enrolled.
 - `images/test/install-fido2.sh`: the FIDO2 key on the LUKS volumes, end to end: boot a
   disk installed by install-from-stick, enrol a software FIDO2 token (softfido.py in the
   booted system) into the volumes' LUKS2 headers, and reboot without the token: on the
-  no-tpm image (`ENCRYPT=luks`) the boot still reaches a login — the initrd waits ~30 s
-  for the key per volume, the wait times out, and the empty key unlocks (the test
-  checks the gap between the two unlock audit lines); on the tpm2 image
-  (`ENCRYPT=tpm2`) the TPM unlocks /var before the token is tried, so the boot
-  succeeds with no delay (the key is the fallback). The installer's own
+  no-tpm image (`ENCRYPT=luks`) the boot still reaches a login (the wait times out,
+  above; the test checks the gap between the two unlock audit lines); on the tpm2 image
+  (`ENCRYPT=tpm2`) the TPM unlocks /var first, so no delay. The installer's own
   enrolment (the volumes still closed in the initrd) needs a FIDO2 device in the initrd,
-  which has no python3, so it is covered only through that no-key path (above).
+  which has no python3, so that path is only covered by the no-key run (above).
 - `images/test/install-safety.sh`: everything `inglenook-install` does before it erases: what it shows,
   the typed confirmation, bad sizes, a non-disk, and that the disk is byte-for-byte unchanged afterwards.
 
@@ -320,8 +304,9 @@ the stick and install itself, then reboot into the new system. Open question:
 creating the first user needs the plain password (homed refuses a hash alone,
 gotcha 25), so the unattended flow carries it on the stick until first boot.
 
-**Progress feedback on the long steps** — `bootc install` runs for several
-minutes with a dead console; a `say` line before each long step.
+**Progress feedback inside the long steps** — every step gets a `say` line
+before it; `bootc install` (several minutes) and the image copy are silent
+while they run.
 
 **The destructive confirmation in the systemd-ask-password idiom** — the wipe
 confirmation is a plain `read`; the `-e` uppercase-`YES` pattern (as in the
@@ -329,13 +314,12 @@ other scripts) is more robust (it also works if the installer is backgrounded)
 and consistent with the first-boot wizard. By extension: the `ask`/`yes_no`
 questions.
 
-**The FIDO2 console blackout, revisited** — with a real key present, the
-enrolment still stops the console shell for ~15 s. The token-enroll wizard
-proved the alternative: the installer reads the PIN itself (masked, on its own
-stdin, with nothing else reading the console) and pre-seeds it as the
-`cryptenroll.fido2-pin` credential, so cryptenroll never opens the console; a
-retry loop handles a wrong PIN. (Rejected in favour of the pure ask-password
-idiom before the wizard existed; the pattern is demonstrated now.)
+**The FIDO2 console blackout** — the console shells are stopped for the whole
+FIDO2 section (in an interactive install, including the wait for the key): the
+installer's own `read` and cryptenroll's ask-password would otherwise share
+the console with the parent shell, and the keystrokes would split between
+readers. b041a64 already fixed the prompt channel (a replacement ask-password
+agent on the script's TTY); what remains is the blackout itself.
 
 **Upstream: homed's `perMachine: null`** — a record without the field breaks
 `homectl update --fido2-device=`; the installer works around it by injecting

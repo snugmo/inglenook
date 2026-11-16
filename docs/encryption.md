@@ -311,9 +311,9 @@ PIN is never written anywhere on the machine.
 **The PIN is bound after the volumes exist.** repart v262 has no
 `--tpm2-with-pin`, so the seal the installer's repart writes is PIN-less. The
 PIN is bound later, per volume, while the volumes are still closed (the
-installer's step 6, after the recovery key is enrolled — that enrolment
-unlocks through the PIN-less seal, which no longer exists after the wipe
-below):
+installer's wipe-and-partition step, after the recovery key is enrolled —
+that enrolment unlocks through the PIN-less seal, which no longer exists
+after the wipe below):
 
     NEWPIN=<pin> systemd-cryptenroll --tpm2-device=auto --tpm2-with-pin=yes \
         --wipe-slot=tpm2 --tpm2-public-key= --unlock-tpm2-device=auto <part>
