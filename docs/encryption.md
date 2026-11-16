@@ -88,19 +88,21 @@ Unlock order in `attach`: (1) a token — PKCS#11, FIDO2 or TPM2; (2) the config
 discovered key; (3) the **empty password, only if** `try-empty-password=` is in the
 options (a crypttab option since v246); (4) prompt the user.
 
-- **Before that order, the generic token scan.** Unless the measurement flags (or
-  `fixate-volume-key`) are in the options, `use_token_plugins()` (cryptsetup.c:1406) is
-  true and `attach` first runs the generic LUKS2 token scan (cryptsetup.c:2599): it tries
-  the installed token plugins and, for a PIN-protected one, asks for the PIN under a
-  credential named `cryptsetup.luks2-pin` (cryptsetup.c:2607). The scan runs ahead of
-  whatever explicit method the options select, so `tpm2-device=auto` alone does *not*
-  route the TPM2 PIN to the in-tree path's `cryptsetup.tpm2-pin` — a PIN-bound token
-  reaches the scan first, the TPM2 plugin refuses to run without a PIN (`-ENOANO`,
-  luks2-tpm2.c:60), and the scan asks for a credential no boot provides. The measurement
-  flags turn the scan off; that is why a PIN-bound root (its gpt-auto unit always carries
-  them on a measured boot) unseals, while the unmeasured `var-mount` options hung
-  (TPM2 with a PIN, below). A PIN-*less* token unseals in the scan (no `USE_PIN`), which
-  is why the no-PIN boots never hit this.
+- **Before that order, the generic token scan.** Unless the measurement flags
+  (or `fixate-volume-key`) are in the options, `use_token_plugins()`
+  (cryptsetup.c:1406) is true and `attach` first runs the generic LUKS2 token
+  scan (cryptsetup.c:2599): it tries the installed token plugins and, for a
+  PIN-protected one, asks for the PIN under a credential named
+  `cryptsetup.luks2-pin` (cryptsetup.c:2607). The scan runs ahead of whatever
+  explicit method the options select, so `tpm2-device=auto` alone does *not*
+  route the TPM2 PIN to the in-tree path's `cryptsetup.tpm2-pin`: a PIN-bound
+  token reaches the scan first, the TPM2 plugin refuses to run without a PIN
+  (`-ENOANO`, luks2-tpm2.c:60), and the scan asks for a credential no boot
+  provides. The measurement flags turn the scan off — that is why a
+  PIN-bound root (its gpt-auto unit always carries them on a measured boot)
+  unseals, while the unmeasured `var-mount` options hung (TPM2 with a PIN,
+  below). A PIN-*less* token unseals in the scan (no `USE_PIN`), which is why
+  no-PIN boots never hit this.
 - **FIDO2 is opt-in**: it needs `fido2-device=auto` in the options. It is not
   auto-detected even when a token is plugged in and a FIDO2 token is enrolled in the
   LUKS header.
@@ -179,28 +181,26 @@ the empty slot (end of this section). This is the **no-tpm** image variant
 (`VARIANT=no-tpm images/build.sh`; the choice is recorded as an image label and
 carried into the installer's addon, docs/installer.md).
 
-**Locked-down boot leaves no kargs channel.** For a type-2 entry systemd-boot marks
-the embedded command line `options_implied` (`boot.c:2526`) and passes nothing to the
-PE (`call_image_start`, `boot.c:3077`: `options_initrd ?: options_implied ? NULL :
-options`) — the stub boots with its own signed, measured command line. Even the QEMU test channel
-(`io.systemd.boot.kernel-cmdline-extra`) is gated to `LOADER_LINUX` (type-1)
-entries, so a type-2 UKI has zero kargs injection points — on machines *and* in the
-test VMs. A fixed LUKS2 UUID would not save a kargs scheme either: repart derives
-the LUKS2 UUID deterministically from the partition UUID (HMAC-SHA256 of
+**Locked-down boot leaves no kargs channel.** For a type-2 entry systemd-boot
+marks the embedded command line `options_implied` (`boot.c:2526`) and passes
+nothing to the PE (`call_image_start`, `boot.c:3077`) — the stub boots with its
+own signed, measured command line — and the only other channel (the SMBIOS
+`io.systemd.boot.kernel-cmdline-extra`, above) is gated to type-1 entries, so a
+type-2 UKI has zero kargs injection points, on machines *and* in the test VMs.
+A fixed LUKS2 UUID would not save a kargs scheme either: repart derives the
+LUKS2 UUID deterministically from the partition UUID (HMAC-SHA256 of
 `"luks-uuid"`), so pinning the partition UUID would make the UUID a build-time
 constant — but `rd.luks.uuid=` then makes cryptsetup-generator *unconditionally*
 write `systemd-cryptsetup@root.service` into the normal generator directory,
 shadowing gpt-auto's `generator.late` copy in **every** mode with one static
-options string, and (as shown below) no single static string is safe for all
-modes.
+options string, and no single static string is safe for all modes (below).
 
-**The static carrier that works is a drop-in.** A unit's drop-ins are collected
-from *every* directory in the search path regardless of which fragment won the
-load-path race (`unit_find_dropin_paths`, load-dropin.c:16 → `unit_file_find_dirs`,
-dropin.c:144-176: the unit's own name, its template, and the type-level dir), so a
-drop-in shipped in the image's initrd applies to gpt-auto's generated
-`systemd-cryptsetup@root.service` — and a drop-in may clear and replace
-`ExecStart=`.
+**The static carrier that works is a drop-in.** Drop-ins are collected for a
+unit regardless of which fragment won the load-path race (item 2, above:
+`unit_find_dropin_paths`, load-dropin.c:16 → `unit_file_find_dirs`,
+dropin.c:144-176), so a drop-in shipped in the image's initrd applies to
+gpt-auto's generated `systemd-cryptsetup@root.service` — and a drop-in may
+clear and replace `ExecStart=`.
 
 **But one drop-in for all modes is not enough: the safe option sets are
 mode-specific, and the two modes' sets are mutually exclusive.** The tempting
@@ -255,33 +255,30 @@ static command line, the same unit starts, and `attach` on an already-active
 volume returns 0 ("Volume already active") before any token attempt. The
 drop-in ships in the initrd only; the rootfs needs nothing.
 
-The install side of the no-TPM variant (docs/installer.md): the installer's repart
-runs with `--seed=` set to the machine id it generates (every partition, LUKS and
-filesystem UUID is derived from it), `Encrypt=key-file` appended to both the root
-and the /var definitions with *no* `KeyFile=`/`--key-file=` (the documented
-zero-length-key default), and opens both volumes with the empty password
-(`try-empty-password=true`) for the install itself. The tpm2 variant differs only
-in the `Encrypt=` values (`tpm2`) and the options the installer passes to its own
-`systemd-cryptsetup attach` calls.
+The install side of the no-TPM variant (docs/installer.md): the installer's
+repart runs with `--seed=` set to the machine id it generates, `Encrypt=key-file`
+appended to the root and /var definitions with *no* `KeyFile=`/`--key-file=`
+(the documented zero-length-key default), and opens both volumes with the empty
+password for the install itself. The tpm2 variant differs only in the
+`Encrypt=` values and the installer's own attach options.
 
-The installer can enrol a FIDO2 key into the volumes' LUKS2 headers while they are
-still closed (before the install itself), with `systemd-cryptenroll --fido2-device=auto`
-and the volume key fetched the same way the volume is sealed: `--unlock-empty` for
-the no-TPM variant's empty-key root and /var, `--unlock-tpm2-device=auto` for the
-TPM-sealed /var (both variants; its boot path, the initrd's /var unlock, already
-tries `fido2-device=auto`). Each enrolment adds a keyslot and a `systemd-fido2`
-token (see the LUKS2 facts); the existing keys (the TPM seal, the empty key) are
-untouched, so the state after such an install is "enrolled, token present (or
-absent at boot)" in the matrix above, never "fresh". At boot, a TPM-sealed volume
-still unlocks from the TPM first, so the key there is the fallback for a lost
-TPM; a volume with only the empty key (the no-TPM image; /var on the tpm2 image
-when there is no TPM) boots without the key too, ~30 s slower per volume: the
-token wait times out and the empty key unlocks, so the key is a fast path rather
-than a gate. A volume becomes token-gated only when the token is its sole
-method (the other keyslots wiped, below). The tpm2 variant's TPM-sealed *root*
-is not offered: the unit gpt-auto
-generates for it carries no FIDO2 option (a static drop-in cannot add one safely),
-so an enrolled token would never be tried there.
+The installer can enrol a FIDO2 key into the volumes' LUKS2 headers while they
+are still closed (before the install itself), with
+`systemd-cryptenroll --fido2-device=auto` and the volume key fetched the same
+way the volume is sealed: `--unlock-empty` for the no-TPM variant's empty-key
+root and /var, `--unlock-tpm2-device=auto` for the TPM-sealed /var (both
+variants — the initrd's /var unlock already tries `fido2-device=auto`). Each
+enrolment adds a keyslot and a `systemd-fido2` token (the LUKS2 facts above);
+the existing keys are untouched, so the state after such an install is
+"enrolled, token present (or absent at boot)" in the matrix above, never
+"fresh". At boot, a TPM-sealed volume still unlocks from the TPM first (the
+key is the fallback for a lost TPM); a volume with only the empty key (the
+no-TPM image; /var on the tpm2 image when there is no TPM) boots without the
+key too, ~30 s slower per volume (the token wait times out, the empty key
+unlocks) — a fast path rather than a gate. The tpm2 variant's TPM-sealed
+*root* is not offered: the unit gpt-auto generates for it carries no FIDO2
+option (a static drop-in cannot add one safely), so an enrolled token would
+never be tried there.
 
 Remaining open items:
 
@@ -294,11 +291,6 @@ Remaining open items:
   conversion suggests libcryptsetup can signal "not unique" and bail to the
   next method instead of trying the second token. One key is the designed
   path; verify the plugin's iteration semantics before promising multiple.
-- *Resolved* — the console on a type-2 entry: the `kernel-cmdline-extra`
-  channel is type-1 only, but the serial console is a UKI addon on the ESP
-  (see "Levers that do not work"), so a locked-down system gets `console=`
-  without baking it into the UKI and without any test-only build flag.
-
 If the installer did not enrol the key (or for a volume it could not offer),
 the first user enrolls a token on the booted system
 (`run0 systemd-cryptenroll --fido2-device=auto /dev/mapper/root`) and wipes
@@ -340,18 +332,18 @@ One unlock method per invocation: `--unlock-tpm2-device=auto` is it; a second
 **The binding is a replacement, and the replacement is what makes it a
 gate.** The sealing policy incorporates the PIN as a *constant*
 `PolicyAuthValue` marker — the hash of the `TPM2_CC_PolicyAuthValue` command
-code, not of the PIN value (`tpm2_calculate_policy_auth_value`,
-tpm2-util.c:4890; the TPM side, `tpm2_policy_auth_value`) — so a PIN-bound
-token has a different policy hash than the PIN-less one with the same PCR
-set. The enrolment's `search_policy_hash` therefore does not find the existing
-token: it seals a *new* keyslot for the new seal, and `--wipe-slot=tpm2`
-deletes the PIN-less token and slot — `find_slots_by_mask` matches only TPM2
-tokens, so a FIDO2 token and the recovery keyslot are left alone, and the
-newly enrolled slot is kept (`wipe_except_slot`). The wipe is authorised with
-the volume key `--unlock-tpm2-device=auto` fetched through the PIN-less seal:
-no PIN is needed for the unlock, `$NEWPIN` feeds the new seal only. Keeping
-both seals would defeat the point: at boot the PIN-less token would be found
-first and would always win.
+code, not of the PIN value (tpm2-util.c:4890; the TPM side,
+`tpm2_policy_auth_value`) — so a PIN-bound token has a different policy hash
+than the PIN-less one with the same PCR set: the enrolment's
+`search_policy_hash` does not find the existing token, it seals a *new*
+keyslot for the new seal, and `--wipe-slot=tpm2` deletes the PIN-less token
+and slot. `find_slots_by_mask` matches only TPM2 tokens, so a FIDO2 token and
+the recovery keyslot are left alone, and the newly enrolled slot is kept
+(`wipe_except_slot`). The wipe is authorised with the volume key
+`--unlock-tpm2-device=auto` fetched through the PIN-less seal: no PIN is
+needed for the unlock, `$NEWPIN` feeds the new seal only. Keeping both seals
+would defeat the point: at boot the PIN-less token would be found first and
+would always win.
 
 **The root needs no new unit: the in-tree path already handles the PIN.** The
 measured-boot unit (gpt-auto; the tpm2 variant carries no drop-in) already has
@@ -376,11 +368,11 @@ the PIN in this order:
    *not* consulted on this path (it is restricted to callers that set
    `ASK_PASSWORD_NO_AGENT` and `ASK_PASSWORD_ACCEPT_CACHED`), so each
    PIN-bound volume is prompted once — root first, then /var, the same PIN
-   twice — unless the credential is present. (The answers are stored in the
-   uid-0 keyring under `tpm2-pin` with a 2.5-minute expiry, a side effect
-   nothing in this flow reads; a wrong PIN re-asks through the same channel,
-   up to 5 times per volume, and the loop clears `ASK_PASSWORD_ACCEPT_CACHED`
-   after the first ask so a cached wrong answer is never retried.)
+   twice — unless the credential is present. (Answers also land in the
+   uid-0 keyring under `tpm2-pin`, but this path never reads them; a wrong
+   PIN re-asks through the same channel, up to 5 times per volume, and a
+   cached wrong answer is never retried — the loop clears
+   `ASK_PASSWORD_ACCEPT_CACHED` after the first ask.)
 
 The agent needs a running watcher, and the initrd has none (the preset
 disables everything; the stock `systemd-ask-password-console.service` has no
