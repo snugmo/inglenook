@@ -163,8 +163,8 @@ options (a crypttab option since v246); (4) prompt the user.
   first, so that does not apply.)
 - The initrd already has what a FIDO2 unlock needs: `libfido2`, the `fido_id` udev
   helper (`60-fido-id.rules`), the cryptsetup token modules
-  (`libcryptsetup-token-systemd-{fido2,pkcs11,tpm2}.so`), and plymouth for the PIN
-  prompt.
+  (`libcryptsetup-token-systemd-{fido2,pkcs11,tpm2}.so`), and the console
+  ask-password agent for the PIN prompt (the initrd has no plymouth).
 - **Version skew**: an extracted initrd once said `systemd 259.9-1.fc44` while the
   image had `262-3.fc45` — a stale mkosi build, not a feature difference. If the
   initrd's systemd version does not match the image's, rebuild with a clean mkosi
@@ -240,7 +240,7 @@ volume:
 | state | what the attach does |
 | --- | --- |
 | **fresh** (empty slot only, no token) | the FIDO2 plugin finds no `systemd-fido2` metadata → `-ENXIO`/`-ENOENT`/`-ENOTUNIQ` → converted to `-EAGAIN` (cryptsetup-token-systemd-fido2.c:130) and dropped immediately (the 30-second monitor only starts when a token *is* in the header) → `try-empty-password` unlocks. Hands-off. |
-| **enrolled, token present** | the plugin unlocks the volume key; the PIN comes through ask-password (the `cryptsetup.fido2-pin` credential, or the plymouth prompt). |
+| **enrolled, token present** | the plugin unlocks the volume key; the PIN comes through ask-password (the `cryptsetup.fido2-pin` credential, or the console agent's prompt). |
 | **enrolled, token absent** | the plugin's device enumeration finds nothing (`FIDO_ERR_INTERNAL` → synthetic `-EAGAIN`) → the 30-second udev monitor for the device → on timeout `-EAGAIN` again → the attach loop drops the token method and `try-empty-password` unlocks with the empty key. The boot is ~30 s slower per volume, not failed; the volume is token-gated only once the empty keyslot is wiped. |
 | **unencrypted install from this image** | no `crypto_LUKS` partition → gpt-auto generates no cryptsetup unit → the drop-in (with no fragment to attach to) is inert. |
 

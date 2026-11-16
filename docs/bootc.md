@@ -116,15 +116,18 @@ flow), to be added to `images/build.sh` rather than a second `Containerfile`.
 
 ## Other build quirks
 
-- **Plymouth** is in the image (`plymouth`, `plymouth-system-theme`: with it
-  come the two-step and label plugins and the Cantarell font the prompt text
-  needs) and in the initrd (mkosi's `plymouth` profile in
-  `images/initrd/mkosi.conf`). `systemd-ask-password-plymouth.path` (shipped
-  by the plymouth package) forwards every password/PIN question to it, so no
-  extra glue is needed. The kernel command line has no `splash`/`quiet`, so it
-  shows the text mode with the boot messages; add `splash` (and `quiet`) to
-  `KARGS` for the graphical splash. Untested on the machine; its SELinux
-  denials, if any, are not yet in the policy.
+- **Plymouth** is in the image only (`plymouth`, `plymouth-system-theme`:
+  the theme brings the two-step and label plugins and the Cantarell font the
+  prompt text needs). `systemd-ask-password-plymouth.path` (shipped by the
+  plymouth package) forwards the main system's password/PIN questions to it,
+  so no extra glue is needed. The initrd has no plymouth (an old mkosi
+  `Profiles=plymouth` line was a no-op — a profile names a config directory,
+  not a package); its ask-password prompts (TPM PIN, FIDO2 PIN) are served by
+  `inglenook-ask-password.service`, the console agent. The kernel command
+  line has no `splash`/`quiet`, so the image shows text mode with the boot
+  messages; add `splash` (and `quiet`) to `KARGS` for the graphical splash.
+  Untested on the machine; its SELinux denials, if any, are not yet in the
+  policy.
 - **apse** (github.com/snugmo/apse) — the unprivileged in-process sandbox for
   GUI apps on the Sway desktop (namespaces + a rebuilt rootfs + Landlock/
   seccomp via the nono crate, and `wp_security_context_v1`-tagged Wayland

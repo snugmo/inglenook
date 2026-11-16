@@ -177,11 +177,13 @@ reasoning) and, where relevant, the topic docs.
     under `/usr/lib/modules` in the initrd). Fix: remove the
     `localhost/inglenook-*` images, `podman image prune -a`, rebuild. Details:
     docs/bootc.md.
-6b. **Plymouth** is in the image and the initrd (mkosi profile);
-    `systemd-ask-password-plymouth.path` forwards every password/PIN question
-    to it, no glue needed. The kernel command line has no `splash`/`quiet`
-    (text mode with the boot messages); add them to `KARGS` for the graphical
-    splash. Details: docs/bootc.md.
+6b. **Plymouth** is in the image only: it draws the console splash and the
+    main system's ask-password prompts (the plymouth package's path unit
+    forwards them, no glue). The initrd has *no* plymouth — its ask-password
+    questions (TPM PIN, FIDO2 PIN) are served by the console agent
+    (`inglenook-ask-password.service`). The kernel command line has no
+    `splash`/`quiet` (text mode with the boot messages); add them to `KARGS`
+    for the graphical splash. Details: docs/bootc.md.
 6c. **apse** (github.com/snugmo/apse) — the in-process sandbox for GUI apps
     on the Sway desktop (successor to wlsctx) — has no releases, so the
     `apse-build` stage builds the binary with cargo from a commit pinned by
