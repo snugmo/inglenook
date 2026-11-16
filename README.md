@@ -49,8 +49,8 @@ docs/            # On-demand reference docs (see below)
 ## Building
 
 ```sh
-./images/build.sh           # → ghcr.io/snugmo/inglenook:<git-describe tag>
-./images/build.sh push      # and publish to GitHub Container Registry
+./images/build.sh           # → quay.io/snugmo/inglenook:<git-describe tag>
+./images/build.sh push      # and publish to Quay
 ```
 
 Rootless buildah (no Docker daemon); mkosi is needed for the initrd.

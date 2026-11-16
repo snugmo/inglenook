@@ -40,7 +40,7 @@ docs/            # On-demand reference docs — read when relevant (see below)
 | Task                     | Command                                                                          |
 | ------------------------ | -------------------------------------------------------------------------------- |
 | Build bootc OCI image    | `./images/build.sh` (needs mkosi; a plain `buildah build` fails: the `initrd` build context and `COMPOSEFS_DIGEST` are required) |
-| Build + push to ghcr     | `./images/build.sh push`                                                          |
+| Build + push to quay     | `./images/build.sh push`                                                          |
 | Stateless-boot test      | `./images/test/wipe.sh` (after smoke.sh: wipes /etc and /var, boots twice, checks SELinux and the journal) |
 | First-boot /var test     | `./images/test/xfsvar.sh` (installs with `--root-size`, grows the disk, checks the initrd safety net makes the LUKS2 XFS /var partition, twice, and that data survives) |
 | Installer stick (no live mode) | `images/installer/stick.sh <image-ref>` builds `build/installer/stick.img` (one FAT32 partition); tests: `installer-env.sh`, `install-from-stick.sh` (whole install onto a disk with old data, stick pulled, boot from the disk; `FIDO2=1` covers the no-key path), `install-fido2.sh` (FIDO2 on the LUKS volumes: `ENCRYPT=luks` boots with a ~30 s token wait per volume, `tpm2` TPM-first; `luks` needs the no-tpm image), `install-safety.sh` (refusals, disk untouched) — docs/installer.md |
@@ -102,8 +102,8 @@ docs/            # On-demand reference docs — read when relevant (see below)
   target → mkosi initrd → `base` target → composefs digest → final image with
   the UKI.
 - The tag is the git-describe version (leading `v` stripped, `latest`
-  fallback), so the image ref is `ghcr.io/snugmo/inglenook:<tag>` — e.g.
-  `0.1.0`. Registry defaults to `ghcr.io/snugmo`; `push` publishes,
+  fallback), so the image ref is `quay.io/snugmo/inglenook:<tag>` — e.g.
+  `0.1.0`. Registry defaults to `quay.io/snugmo`; `push` publishes,
   `DEV_REGISTRY=localhost:5000` for local dev / CI.
 - Passes `--build-arg VERSION=<tag>` and `--build-arg REVISION=$(git rev-parse
   HEAD)` for the `org.opencontainers.image.*` labels in the Containerfile.
@@ -319,7 +319,7 @@ reasoning) and, where relevant, the topic docs.
 
 - **New package/tool**: add it to `images/Containerfile` (respecting
   layer-cache ordering), rebuild, and verify the bootc labels survived (e.g.
-  `skopeo inspect --config ghcr.io/snugmo/inglenook:<tag> | jq .config.Labels`).
+  `skopeo inspect --config quay.io/snugmo/inglenook:<tag> | jq .config.Labels`).
 - **New media** (e.g. VM image, ISO): not part of the current bootc CLI — work
   out an osbuild-based flow first, then add it to `images/build.sh` rather
   than a second `Containerfile`.
