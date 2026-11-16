@@ -1,19 +1,16 @@
 # AGENTS.md — Inglenook Bootc Image Agent Configuration
 
-> **Status: early but working.** The image builds (`images/build.sh`) and boots in
-> QEMU with the composefs backend, systemd-boot and a UKI (no GRUB, no dracut),
-> SELinux permissive (while the policy is worked out), a clean journal and a
-> wipe-able `/etc` and `/var`. `images/installer/stick.sh` makes the installer
-> stick (docs/installer.md): a root shell in the initrd, `inglenook-install`
-> installs the image to the internal drive and does all the disk provisioning
-> there (machine id, repart with the machine id as `--seed`, LUKS2 root and
-> /var, /var doubling as the image-copy scratch), and can enrol a FIDO2
-> security key into the volumes' LUKS2 headers while they are still closed.
-> There are two image variants (`VARIANT=tpm2` the default, `no-tpm`): how an
-> encrypted root is unlocked differs (TPM-sealed vs empty-key-slot LUKS,
-> docs/encryption.md). A Sway desktop and its tools are in the image packages;
-> the default target is graphical.target and sddm (enabled by its preset) shows
-> the login screen. Update this file as things change.
+> **Status: early but working.** The image builds (`images/build.sh`) and boots
+> in QEMU: composefs root, systemd-boot, a UKI (no GRUB, no dracut), SELinux
+> permissive (policy in progress), a clean journal, wipe-able `/etc` and
+> `/var`. The installer stick (`images/installer/stick.sh`, docs/installer.md)
+> gives a root shell in the initrd; `inglenook-install` then installs the
+> image and does the disk provisioning (machine id as the repart `--seed`,
+> LUKS2 root and /var, /var doubling as the image-copy scratch, optional
+> FIDO2 enrolment into the closed LUKS2 headers). Two image variants: `tpm2`
+> (default, TPM-sealed root) and `no-tpm` (empty-key-slot LUKS root) —
+> docs/encryption.md. A Sway desktop is in the image; the default target is
+> graphical.target, sddm shows the login. Update this file as things change.
 
 ## Project Overview
 
@@ -42,8 +39,8 @@ docs/            # On-demand reference docs — read when relevant (see below)
 | Build bootc OCI image    | `./images/build.sh` (needs mkosi; a plain `buildah build` fails: the `initrd` build context and `COMPOSEFS_DIGEST` are required) |
 | Build + push to quay     | `./images/build.sh push`                                                          |
 | Stateless-boot test      | `./images/test/wipe.sh` (after smoke.sh: wipes /etc and /var, boots twice, checks SELinux and the journal) |
-| First-boot /var test     | `./images/test/xfsvar.sh` (installs with `--root-size`, grows the disk, checks the initrd safety net makes the LUKS2 XFS /var partition, twice, and that data survives) |
-| Installer stick (no live mode) | `images/installer/stick.sh <image-ref>` builds `build/installer/stick.img` (one FAT32 partition); tests: `installer-env.sh`, `install-from-stick.sh` (whole install onto a disk with old data, stick pulled, boot from the disk; `FIDO2=1` covers the no-key path), `install-fido2.sh` (FIDO2 on the LUKS volumes: `ENCRYPT=luks` boots with a ~30 s token wait per volume, `tpm2` TPM-first; `luks` needs the no-tpm image), `install-safety.sh` (refusals, disk untouched) — docs/installer.md |
+| First-boot /var test     | `./images/test/xfsvar.sh` (installs with `--root-size`, grows the disk; checks the initrd safety net makes the LUKS2 XFS /var, twice, and that data survives) |
+| Installer stick (no live mode) | `images/installer/stick.sh <image-ref>` builds `build/installer/stick.img` (one FAT32 partition); tests: `installer-env.sh`, `install-from-stick.sh` (whole install onto a disk with old data, stick pulled, boot from it; `FIDO2=1` = the no-key path), `install-fido2.sh` (FIDO2 on the LUKS volumes; `luks` needs the no-tpm image, `tpm2` is TPM-first — the no-key boot waits ~30 s per volume), `install-safety.sh` (refusals, disk untouched) — docs/installer.md |
 | Hardware-token login test | `./images/test/token.sh` (software FIDO2 token in the VM: homed users, run0's polkit stack, pam-u2f, ssh; see docs/tokens.md) |
 | SELinux denials of a boot | `images/test/vm.sh avc` (summary) / `new-avc` (not in the baseline); on the machine: `ausearch -m avc` as root |
 | Smoke-test the image     | `./images/test/smoke.sh` (build, install, boot over vsock, check; needs KVM, OVMF, vhost-device-vsock) |
@@ -77,17 +74,15 @@ docs/            # On-demand reference docs — read when relevant (see below)
   no desktop/GUI), not UBI; has no baked-in account (the first user is created
   by the installer). We stay off Rawhide/46 so unfinished upstream work doesn't
   mask our own tooling issues.
-- The 3D (sbix) Noto Color Emoji builds (versioned release zip, ~826 MB
-  unpacked in `/usr/share/fonts`) give terminals like foot their color emoji:
-  the RPM only ships the COLRv1 variant, which fcft rejects, and fontconfig
-  ranks that file first for the shared family name — fcft's primary is the
-  first ranked candidate, so a rejected primary fails the whole family (foot
-  ends on monochrome). `rootfs/etc/fonts/conf.d/60-noto-emoji-3d.conf`
-  injects `foundry=GOOG` into any request for the family (a `<match
-  target="pattern">` rule), excluding the COLRv1 file (foundry=NONE) from
-  FcFontSort so the primary is a 3D file FreeType renders in color; no
-  per-user foot.ini edit is needed. The zip is pinned by SHA-256 in the
-  Containerfile.
+- **Color emoji (the 3D/sbix Noto builds)**: the RPM only ships the COLRv1
+  variant, which fcft rejects — and fontconfig ranks that file first for the
+  shared family name, and a rejected primary fails the whole family (foot
+  ends monochrome). A versioned release zip (pinned by SHA-256, ~826 MB
+  unpacked in `/usr/share/fonts`) plus
+  `rootfs/etc/fonts/conf.d/60-noto-emoji-3d.conf` (a `<match
+  target="pattern">` rule injecting `foundry=GOOG` into requests for the
+  family, excluding the COLRv1 file from FcFontSort) make the primary a 3D
+  file FreeType renders in color; no per-user foot.ini edit.
 - The final stage must be a bootc stage — our base already is, and the stage is
   inherited through added layers. Never base a stage on a *non*-bootc image
   without adding a `switch-to-bootc-container` step.
@@ -187,14 +182,13 @@ reasoning) and, where relevant, the topic docs.
     for the graphical splash. Details: docs/bootc.md.
 6c. **apse** (github.com/snugmo/apse) — the in-process sandbox for GUI apps
     on the Sway desktop (successor to wlsctx) — has no releases, so the
-    `apse-build` stage builds the binary with cargo from a commit pinned by
-    tarball SHA-256 (`--locked`); only `/usr/bin/apse` goes into the image.
-    Its SELinux module is vendored next to `inglenook.cil` and installed by
-    the same `semodule -n -i` (it needs `flatpak_home_t`, so flatpak-selinux
-    stays in the desktop dnf); `restorecon /usr/bin/apse` on a deployed system
-    labels it `apse_exec_t` and starts the confined run. The user units (the
-    clipboard prompt broker) are not installed; they are per-user. Details:
-    docs/bootc.md.
+    `apse-build` stage builds it with cargo from a commit pinned by tarball
+    SHA-256 (`--locked`); only `/usr/bin/apse` goes into the image. Its
+    SELinux module is vendored next to `inglenook.cil` (same `semodule -n -i`;
+    it needs `flatpak_home_t`, so flatpak-selinux stays in the desktop dnf)
+    and `restorecon /usr/bin/apse` on a deployed system starts the confined
+    run. The clipboard-prompt user units are per-user, not installed.
+    Details: docs/bootc.md.
 6. **No dracut**: the initrd is built by mkosi (`images/initrd`) from the
    `pre` stage's kernel modules and bootc's `initramfs-setup`/`bootc-root-setup.service`,
    and installed as `/usr/lib/modules/<kver>/initramfs.img` in the `base`
@@ -223,13 +217,11 @@ reasoning) and, where relevant, the topic docs.
     `userdbctl`). Details: docs/gotchas.md, docs/tokens.md.
 11. **Factory /etc**: the last `pre` step snapshots the finished `/etc` into
     `/usr/share/factory/etc` and generates the tmpfiles `C!` rules; if `/etc`
-    is wiped, `inglenook-etc-restore.service` in the initrd restores and labels
-    it before switch-root (PID 1 loads the SELinux policy from `/etc/selinux`,
-    and early services read `/etc` before tmpfiles in the real root). Anything
-    added to `/etc` in the Containerfile must come before the snapshot step.
-    `machine-id` is in the set as an *empty* file on purpose (an existing-but-
-    empty one is not a first boot, so the first-boot wizards and preset-all
-    stay off). Details: docs/gotchas.md.
+    is wiped, `inglenook-etc-restore.service` (initrd) restores and labels it
+    before switch-root. Anything added to `/etc` in the Containerfile must
+    come before the snapshot step. `machine-id` is in the set as an *empty*
+    file on purpose (an existing-but-empty file is not a first boot, so the
+    first-boot wizards and preset-all stay off). Details: docs/gotchas.md.
 12. **Units with `DefaultDependencies=no` race tmpfiles on a fresh `/var`**
     (e.g. `rpc-statd-notify`): add `After=systemd-tmpfiles-setup.service` in a
     drop-in under `rootfs/`. The wipe and smoke tests fail on any
@@ -245,43 +237,40 @@ reasoning) and, where relevant, the topic docs.
     `<user>:524288:65536` to both in the new system's `/etc` (and labels them).
     The image seeds nothing.
 16. **Encrypted everything, XFS /var (the default of an installed system).**
-    The root is LUKS2 (sealed to the TPM on the tpm2 variant, an empty keyslot
-    on the no-tpm one; ext4 inside, because composefs needs fs-verity and
-    `mkfs.xfs` has none), and the installer creates a LUKS2 XFS /var in all
-    free space after the root, with the machine id as repart `--seed` (every
-    UUID a deterministic function of it). For systems that skip the installer,
-    the initrd services (`inglenook-var-repart`, `inglenook-var-mount`) are a
-    first-boot safety net; a fresh /var is skeletonized and labelled with
-    `setfiles` before switch-root. The growth units (bootc's growpart, systemd
-    262's growfs) are masked — the installer fixes the sizes at install time.
-    Do not use `systemd-tpm2-setup-early`'s SRK file or
-    `systemd-analyze has-tpm2` as the "is there a TPM" test: both need a
+    LUKS2 root (TPM-sealed on the tpm2 variant, empty keyslot on no-tpm;
+    ext4 inside — composefs needs fs-verity, `mkfs.xfs` has none), LUKS2 XFS
+    /var in all free space; the machine id is the repart `--seed`, so every
+    UUID is a deterministic function of it. The initrd's
+    `inglenook-var-repart`/`inglenook-var-mount` are a first-boot safety net
+    for systems that skip the installer (a fresh /var is skeletonized and
+    labelled before switch-root). The growth units are masked — the installer
+    fixes the sizes at install time. Do not use `systemd-tpm2-setup-early`'s
+    SRK file or `systemd-analyze has-tpm2` as a TPM test: both need a
     measured boot, which the test VM's OVMF does not give. Details:
     docs/gotchas.md (layout, labelling, growth), docs/encryption.md (unlocking),
     docs/installer.md (provisioning).
 17. **SELinux is permissive on purpose**: the UKI carries `enforcing=0` —
     `SELINUX_ENFORCING=1` does **not boot yet** (the mkosi initrd has no
-    policy; shipping it there is the long-term plan). Local policy is CIL
-    (`images/rootfs/usr/share/inglenook/selinux/*.cil`, `semodule -n -i` at
-    build; no compiler needed). Hunt denials with `ausearch -m avc` as root (or
-    `vm.sh avc`); `images/test/selinux-denials.baseline` is the to-do list —
-    tests fail only on denials missing from it, so shrink it as rules land.
-    Never allow the dontaudit noise (siginh, rlimitinh, noatsecure). Details:
-    docs/gotchas.md.
+    policy). Local policy is CIL (`images/rootfs/usr/share/inglenook/selinux/*.cil`,
+    `semodule -n -i` at build; no compiler needed). Hunt denials with
+    `ausearch -m avc` as root (or `vm.sh avc`);
+    `images/test/selinux-denials.baseline` is the to-do list — tests fail only
+    on denials missing from it, so shrink it as rules land. Never allow the
+    dontaudit noise (siginh, rlimitinh, noatsecure). Details: docs/gotchas.md.
 18. **No dev key in the image.** Logins come from credentials passed to the VM
     or from the installer; `dev-keys/` (gitignored; never commit a key) is the
     home of the PCR signing key only.
-19. *(Removed with the live stick; the install flow is gotcha 24 and
+19. *(Removed with the live stick; the install flow is gotcha 24,
     docs/installer.md.)*
 20. **Wrong or missing labels on the mutable state** (`/etc`, `/var`,
     `/sysroot/state`; the OS content is labeled inside the composefs image):
     recovery is to boot permissive (the UKI default), then
     `restorecon -R /etc /var` (the mounted views only). **Never run restorecon
-    (or an autorelabel) on `/sysroot` or anything under it** — labels are
+    or an autorelabel on `/sysroot` or anything under it** — labels are
     derived from the path against the running system's file-context patterns,
     so on the backing directories most files get a generic fallback label and
-    the system breaks. This rules out `touch /.autorelabel` (a full relabel)
-    and `restorecon -R /sysroot/state`. Details: docs/gotchas.md.
+    the system breaks (this rules out `touch /.autorelabel` and
+    `restorecon -R /sysroot/state`). Details: docs/gotchas.md.
 21. *(Removed with the live stick.)*
 22. **No setuid files**: the Containerfile strips the setuid bit from
     everything in `/usr` (sudo, GRUB, shim and bootupd are removed too) and
@@ -298,16 +287,15 @@ reasoning) and, where relevant, the topic docs.
     *server*. Details: docs/gotchas.md.
 24. **The installer** (playbook: docs/installer.md) runs in the initrd of the
     stick's own UKI: `bootc install to-filesystem` without a container. The
-    machine id is generated *before* partitioning and passed as
-    `systemd-repart --seed`, so every UUID is a deterministic function of it;
-    the /var partition doubles as the image-copy scratch; the machine id is
-    written into the deployment's `/etc` so the first boot is not a first boot.
-    The installed system has **no `/boot` mount and no `/etc/fstab`** (the ESP
-    *is* the boot partition; bootc finds it by device scan). The image variant
-    decides the encryption modes offered and the root-unlock drop-in; the
-    addon's package overlay must stay byte-identical to the boot initrd (the
-    overlay's bootc is pinned to the initrd's version). Details:
-    docs/gotchas.md.
+    machine id is generated *before* partitioning and passed as repart
+    `--seed` (every UUID a deterministic function of it); the /var partition
+    doubles as the image-copy scratch; the machine id is written into the
+    deployment's `/etc` so the first boot is not a first boot. The installed
+    system has **no `/boot` mount and no `/etc/fstab`** (the ESP is the boot
+    partition; bootc finds it by device scan). The image variant decides the
+    encryption modes offered and the root-unlock drop-in; the addon's package
+    overlay must stay byte-identical to the boot initrd (the overlay's bootc
+    is pinned to the initrd's version). Details: docs/gotchas.md.
 25. **The first user.** Root is locked, so `inglenook-install` writes a
     `home.create.<name>` credential (a homed record: `memberOf: [wheel]`, the
     password hash and the plain password in `secret` — homed refuses to create
@@ -315,8 +303,8 @@ reasoning) and, where relevant, the topic docs.
     `systemd-homed-firstboot` creates the account and deletes the credential.
     The image ships `/etc/machine-id` as an *empty file* on purpose: an
     existing-but-empty file is not a first boot per machine-id(5), so
-    `ConditionFirstBoot` is never true and the first-boot wizards and preset-all
-    stay off. Details: docs/gotchas.md.
+    `ConditionFirstBoot` is never true and the first-boot wizards and
+    preset-all stay off. Details: docs/gotchas.md.
 
 ## Adding New Components
 
@@ -344,18 +332,17 @@ matching one when doing that kind of work.
 - **docs/installer.md** — the installer stick: one FAT32 partition, the UKI
   addon, `inglenook-install`, the first user, the tests (replaced the live
   stick).
-- **docs/encryption.md** — how the initrd unlocks the LUKS root
-  (gpt-auto-generator, cryptsetup-generator, the options that can and cannot
-  be injected), systemd-cryptsetup's unlock order and why a missing FIDO2
-  token delays rather than gates a boot, LUKS2 header/keyslot facts, and the
-  no-TPM2 FIDO2 path (the `no-tpm` image variant: a static drop-in in the
-  initrd with its own `systemd-cryptsetup attach` options; no per-machine
-  kargs — a locked-down type-2 UKI has none — and no wrapper).
+- **docs/encryption.md** — how the initrd unlocks the LUKS root: the
+  generators and the options that can and cannot be injected, the unlock
+  order, why a missing FIDO2 token delays rather than gates a boot, LUKS2
+  header/keyslot facts, the no-TPM2 FIDO2 path (the `no-tpm` variant: a
+  static initrd drop-in with its own `attach` options) and the TPM PIN (the
+  tpm2 variant).
 - **docs/upstream/** — drafts of issues to file upstream (not filed, not part
-  of the image): currently `repart-uuid-change-ignored.md`, a
-  `context_changed()` gap in `systemd-repart` that makes a UUID-only change a
-  silent no-op (why the installer assigns the machine id *before*
-  partitioning instead of two-phase).
+  of the image): `repart-uuid-change-ignored.md` — a `context_changed()` gap
+  in `systemd-repart` that makes a UUID-only change a silent no-op (why the
+  installer assigns the machine id *before* partitioning instead of
+  two-phase).
 
 Planned (to be created when needed):
 
