@@ -25,7 +25,7 @@
 #
 # Environment: ENCRYPT=tpm2|luks (default luks; luks needs the image ref of
 # the no-tpm variant, the tpm2 installer refuses it - without a ref the
-# newest ghcr.io/snugmo/inglenook image is used, which is tpm2), plus
+# newest quay.io/snugmo/inglenook image is used, which is tpm2), plus
 # install-from-stick.sh's (WORK, RAM, KEY, STICK_REUSE, ROOT_SIZE, TARGET_SIZE,
 # OLD_DATA). A disk left in $WORK-boot by a previous install-from-stick run is
 # reused instead of reinstalling.
@@ -42,7 +42,7 @@ export ENCRYPT   # the install-from-stick.sh run below must see the same value
 ref=${1:-}
 if [[ -z $ref ]]; then
   [[ $ENCRYPT == luks ]] && { echo "ENCRYPT=luks needs an image ref of the no-tpm variant" >&2; exit 1; }
-  ref=$(podman images --sort created --format '{{.Repository}}:{{.Tag}}' ghcr.io/snugmo/inglenook | awk 'NR==1')
+  ref=$(podman images --sort created --format '{{.Repository}}:{{.Tag}}' quay.io/snugmo/inglenook | awk 'NR==1')
 fi
 fail=0
 ok() { echo "ok   $1"; }

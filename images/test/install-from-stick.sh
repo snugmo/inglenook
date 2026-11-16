@@ -6,7 +6,7 @@
 # through the environment, pull the stick out as soon as it says the stick is
 # no longer needed, then boot the installed disk alone and check it.
 #
-#   images/test/install-from-stick.sh [image-ref]    (default: the newest ghcr.io/snugmo/inglenook)
+#   images/test/install-from-stick.sh [image-ref]    (default: the newest quay.io/snugmo/inglenook)
 #
 # Environment: ENCRYPT=tpm2|luks|none (default tpm2: the root is LUKS2 sealed to
 # the software TPM; luks: LUKS2 with an empty key, needs the no-tpm image
@@ -45,7 +45,7 @@ TPM2_TESTPIN=test123   # the PIN the test binds (TPM2_PIN=1)
 RAM=${RAM:-4G}
 KEY=${KEY:-$REPO/build/xfsvar/key}
 [[ -f $KEY ]] || { mkdir -p "$(dirname "$KEY")"; ssh-keygen -q -t ed25519 -N '' -C inglenook-test -f "$KEY"; }
-ref=${1:-$(podman images --sort created --format '{{.Repository}}:{{.Tag}}' ghcr.io/snugmo/inglenook | awk 'NR==1')}
+ref=${1:-$(podman images --sort created --format '{{.Repository}}:{{.Tag}}' quay.io/snugmo/inglenook | awk 'NR==1')}
 mkdir -p "$WORK"
 cd "$WORK"
 

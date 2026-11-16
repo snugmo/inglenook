@@ -22,7 +22,7 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 
 NAME=inglenook
-REGISTRY=${DEV_REGISTRY:-ghcr.io/snugmo}
+REGISTRY=${DEV_REGISTRY:-quay.io/snugmo}
 FEDORA_VERSION=${FEDORA_VERSION:-45}
 VARIANT=${VARIANT:-tpm2}
 [[ $VARIANT == tpm2 || $VARIANT == no-tpm ]] || { echo "VARIANT must be tpm2 or no-tpm (got '$VARIANT')" >&2; exit 1; }

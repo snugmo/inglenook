@@ -4,7 +4,7 @@
 # drive, and check that the installer addon puts the machine in a root shell in
 # the initrd, without switching root.
 #
-#   images/test/installer-env.sh [image-ref]     (default: the newest ghcr.io/snugmo/inglenook image)
+#   images/test/installer-env.sh [image-ref]     (default: the newest quay.io/snugmo/inglenook image)
 # Environment: PTYPE (see stick.sh), WORK (default build/installer).
 set -euo pipefail
 
@@ -13,7 +13,7 @@ REPO=$(cd "$HERE/../.." && pwd)
 WORK=${WORK:-$REPO/build/installer}
 export WORK
 OVMF=/usr/share/OVMF
-ref=${1:-$(podman images --sort created --format '{{.Repository}}:{{.Tag}}' ghcr.io/snugmo/inglenook | awk 'NR==1')}
+ref=${1:-$(podman images --sort created --format '{{.Repository}}:{{.Tag}}' quay.io/snugmo/inglenook | awk 'NR==1')}
 
 NO_IMAGE=1 "$REPO/images/installer/stick.sh" "$ref"
 
