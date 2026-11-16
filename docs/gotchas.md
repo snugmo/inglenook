@@ -10,17 +10,17 @@ AGENTS.md entry N).
 The tests log in as **root** over ssh with `$WORK/key` (`vm.sh` hands its
 public half to the VM in the `ssh.authorized_keys.root` SMBIOS credential;
 `SSH_USER=` selects another account); nothing is baked into the image.
-ssh-over-vsock's per-connection sshd only reads `ssh.ephemeral-authorized_keys-all`
-(a hypervisor-injected key) plus `~/.ssh/authorized_keys`. The credential sits
-in the per-service subdirectory of `/run/credentials`, which is root-only, so
-the credential route works for root only: on the release a non-root session is
-stopped by the file permissions before SELinux is even consulted (the SELinux
-denial the prerelease showed no longer surfaces; a non-root vsock login through
-a home `authorized_keys` logs no denial at all). The `sshd_session_t` CIL allow
-(item 17) is still needed on the release — the stock 45.23 policy has no such
-allow — for the root session to read the credential file. Homed users carry
-their ssh keys in the record (`sshAuthorizedKeys`; sshd asks `userdbctl`, see
-docs/tokens.md).
+ssh-over-vsock's per-connection sshd only reads
+`ssh.ephemeral-authorized_keys-all` (a hypervisor-injected key) plus
+`~/.ssh/authorized_keys`. The credential sits in the per-service
+subdirectory of `/run/credentials`, which is root-only, so the credential
+route works for root only (a non-root session is stopped by the file
+permissions before SELinux is even consulted; a non-root vsock login through
+a home `authorized_keys` logs no denial). The `sshd_session_t` CIL allow
+(item 17) is still needed on the release — the stock 45.23 policy has no
+such allow — for the root session to read the credential file. Homed users
+carry their ssh keys in the record (`sshAuthorizedKeys`; sshd asks
+`userdbctl`, docs/tokens.md).
 
 ## 11. Factory /etc
 
@@ -51,42 +51,36 @@ source under `/usr/lib`, so the files must be restored for NSS/PAM to work —
 the CIL module (item 17) allows `systemd_tmpfiles_t` to stat and copy
 `shadow_t`, which the stock policy denies).
 
-`machine-id` is included as an *empty* file on purpose: an existing-but-empty
-file is not a first boot per machine-id(5) (PID 1 bind-mounts a temporary ID
-and commits it later), while a missing one is — a wiped `/etc` without it
-would trigger first-boot preset-all (which re-enables the disabled `mcelog`)
-and the first-boot wizards.
+`machine-id` is included as an *empty* file on purpose: an
+existing-but-empty file is not a first boot per machine-id(5), while a
+missing one is — a wiped `/etc` without it would trigger first-boot
+preset-all (which re-enables the disabled `mcelog`) and the first-boot
+wizards.
 
 ## 16. Encrypted everything, XFS /var
 
-The root is LUKS2 (sealed to the TPM on the tpm2 variant, an empty key slot on
-the no-tpm one; docs/installer.md; ext4 inside, because composefs needs
-fs-verity and `mkfs.xfs` has none; bootc also adds an empty unencrypted `boot`
-partition; only the ESP is plain). `inglenook.var=xfs` is in the image's
-default kernel command line (which has no `console=`: on a machine without a
-UART `console=ttyS0` makes the getty generator start a `serial-getty@ttyS0`
-that fails and restarts every 10 s, since the 8250 driver always has a ttyS0
-node with a `device` link; a serial console is the addon of
-`images/addons/serial-console.sh` in `\loader\addons\` of the ESP: the stub
-concatenates the addon's cmdline to the UKI's, which is the only
-kernel-argument channel a locked-down (type-2) UKI has, and `console=` only
-selects consoles, which is why it is safe there. The stick carries the addon
-for its own boot (without it the installer has no console on real firmware),
-the installer asks about it and copies it to the installed system's ESP on
-request (`INSTALL_CONSOLE`; `INSTALL_YES=1` answers yes), and `vm.sh install`
-puts it on every test ESP — `vm.sh start` still passes `console=` via SMBIOS,
-which a locked-down image ignores) (`KARGS` in the Containerfile).
+The root is LUKS2 (sealed to the TPM on the tpm2 variant, an empty key slot
+on the no-tpm one; docs/installer.md; ext4 inside, because composefs needs
+fs-verity and `mkfs.xfs` has none; bootc also adds an empty unencrypted
+`boot` partition; only the ESP is plain). `inglenook.var=xfs` is in the
+image's default kernel command line, which has no `console=` (a serial
+console comes from the addon on the ESP — docs/encryption.md,
+docs/installer.md). The stick carries the addon for its own boot (without it
+the installer has no console on real firmware), the installer asks about it
+and copies it to the installed system's ESP on request (`INSTALL_CONSOLE`;
+`INSTALL_YES=1` answers yes), and `vm.sh install` puts it on every test ESP
+(`vm.sh start` still passes `console=` via SMBIOS, which a locked-down image
+ignores) (`KARGS` in the Containerfile).
 
-**The installer does the provisioning** (docs/installer.md): it generates the
-machine id and passes it to `systemd-repart` as `--seed`, so every partition,
-LUKS and filesystem UUID is a deterministic function of it, and it creates /var
-(LUKS2: `Encrypt=tpm2` when there is a TPM to seal to, `Encrypt=key-file` — an
-empty slot that unlocks hands-off — otherwise; there is no unencrypted mode)
-with XFS in all free space after the root, and can enrol a FIDO2 security key
-into the volumes' LUKS2 headers while they are still closed (`INSTALL_FIDO2`;
-/var in both variants, plus the no-tpm variant's empty-key root — the
-TPM-sealed root is not offered, its gpt-auto unit carries no FIDO2 option;
-docs/installer.md).
+**The installer does the provisioning** (docs/installer.md): machine id as
+repart `--seed` (every partition, LUKS and filesystem UUID a deterministic
+function of it), /var as LUKS2 XFS in all free space after the root
+(`Encrypt=tpm2` when there is a TPM to seal to, `Encrypt=key-file` — an
+empty slot that unlocks hands-off — otherwise; no unencrypted mode), and
+optional FIDO2 enrolment into the volumes' LUKS2 headers while they are
+still closed (`INSTALL_FIDO2`; /var in both variants, plus the no-tpm
+variant's empty-key root — the TPM-sealed root is not offered, its gpt-auto
+unit carries no FIDO2 option).
 
 **The initrd services are a first-boot safety net** for systems installed
 without the installer (a plain `bootc install`, which makes no /var):
@@ -96,64 +90,58 @@ in `/usr/lib/inglenook/repart.d` (a TPM) or `/usr/lib/inglenook/repart-no-tpm.d`
 (none) — deliberately *not* `/usr/lib/repart.d`: files there make the stock
 `systemd-repart.service` run in the initrd and fail. On a fresh (stick)
 install the partition already exists and repart has nothing to do.
-`inglenook-var-mount.service` runs `/usr/lib/inglenook/var-mount`: it attaches
-the volume with `systemd-cryptsetup` (options
-`tpm2-device=auto,fido2-device=auto,try-empty-password=true,headless=yes` — a
-superset that covers the TPM-sealed, token-enrolled and empty-slot states;
-`try-empty-password=true` is what unlocks the fresh no-TPM volumes) and mounts
-it over the ext4 `/var` bind that `bootc-root-setup` makes at `/sysroot/var`.
-It is a *service*, not a `sysroot-var.mount` unit: systemd skips a mount unit
-for a path that is already mounted.
+`inglenook-var-mount.service` runs `/usr/lib/inglenook/var-mount`: it
+attaches the volume with `systemd-cryptsetup`, branching on the TPM (like the
+installer): with `/dev/tpmrm0`, `tpm2-device=auto` plus the measurement
+flags and `fido2-device=auto,try-empty-password=true`; without it, the
+latter alone (the fresh no-TPM volumes). The flags keep a PIN-bound token
+on the in-tree path (the generic scan would hang on a credential a boot
+never provides — docs/encryption.md), and there is no `headless=` (a
+TPM-PIN volume answers `get_pin` from the `cryptsetup.tpm2-pin` credential
+or the initrd's ask-password agent). It then mounts the XFS over the ext4
+`/var` bind `bootc-root-setup` makes at `/sysroot/var`; a *service*, not a
+`sysroot-var.mount` unit, because systemd skips a mount unit for a path
+that is already mounted.
 
-**Labeling a fresh /var:** no SELinux policy is loaded in the initrd, and a
-mount `rootcontext=` fails silently without one (it never labels the XFS
-root), so a /var without the `/var/.inglenook-relabelled` marker is prepared in
-the script before switch-root: the directory skeleton the first services write
-into (`log/journal`, `lib`, `cache`, `empty`, `spool`) is created and the whole
-tree labelled with `setfiles -m -F -r /sysroot -c <target policy> <target
+**Labeling a fresh /var:** no SELinux policy is loaded in the initrd (a
+mount `rootcontext=` fails silently without one), so a /var without the
+`/var/.inglenook-relabelled` marker is prepared in the script before
+switch-root: the directory skeleton the first services write into
+(`log/journal`, `lib`, `cache`, `empty`, `spool`) is created and the tree
+labelled with `setfiles -m -F -r /sysroot -c <target policy> <target
 file_contexts> /sysroot/var`, the same technique as the factory `/etc`
 restore. Files created afterwards inherit their parent's label, so the first
-boot never sees `unlabeled_t` under `/var` (the first to surface was
-`plymouthd`'s `/var/log/boot.log`, created before any labelling existed).
+boot never sees `unlabeled_t` under `/var`.
 
 **First-boot relabel:** the main root's `inglenook-var-relabel.service`
 (enabled in the image) runs `restorecon -R /var` and drops the marker: files
-created between switch-root and it still carry inherited labels (`var_t`,
-`var_log_t`, …) that do not match their paths, so it fixes them by path; the
-marker makes both it and the initrd's preparation one-shots per fresh /var (a
-wipe or a new partition removes it, so they re-run). Without free space after
-the root, `/var` stays on the root (repart fails, logged, not fatal). Both
-initrd services are ordered `After=tpm2.target` (no `Wants=`:
-systemd-tpm2-generator hooks the target in only when firmware reports a TPM
-whose device is not there yet, so it waits for a slow driver and is a no-op
-without a TPM). Do not use `systemd-tpm2-setup-early`'s SRK file or
-`systemd-analyze has-tpm2` as the "is there a TPM" test: both need a measured
-boot, which the test VM's OVMF does not give, so they say no/partial there
-although the TPM works.
+created between switch-root and it carry inherited labels that do not match
+their paths, so it fixes them by path. The marker makes it and the initrd's
+preparation one-shots per fresh /var. Without free space after the root,
+`/var` stays on the root (repart fails, logged, not fatal). Both initrd
+services are `After=tpm2.target` with no `Wants=` (they wait for a slow
+driver and are a no-op without a TPM). Do not use
+`systemd-tpm2-setup-early`'s SRK file or `systemd-analyze has-tpm2` as a TPM
+test: both need a measured boot, which the test VM's OVMF does not give.
 
 Growth is masked, not done: the base image's
-`bootc-generic-growpart.service` (grows a plain root partition to the end of
-the disk, VM only, skipped for LUKS) and systemd 262's auto-growfs units
-(`systemd-growfs-root.service`, `systemd-growfs@.service`) are all masked in
-the Containerfile — growpart with a plain root in a VM ate the space meant for
-`/var`, and systemd 262's repart marks every filesystem partition it creates
-with the GPT 'grow file system' attribute, so the gpt-auto generator starts a
-growfs unit for it at every boot, which is a no-op (the filesystems already
-fill their partitions) and wrong (`/` is a composefs image file, not a block
-device; the LUKS `/var` rejects `crypt_resize` with EPERM); the installer
-fixes the sizes at install time. systemd 262's
+`bootc-generic-growpart.service` (grew a plain root in VMs, eating the space
+meant for `/var`) and systemd 262's auto-growfs units (its repart marks every
+filesystem partition with the GPT 'grow file system' attribute, so gpt-auto
+starts a growfs unit for it at every boot — a no-op, and wrong for a
+composefs `/` and a LUKS `/var`) are masked in the Containerfile; the
+installer fixes the sizes at install time. systemd 262's
 `systemd-cryptenroll-firstboot.service` is a no-op on a fresh install (the
 installer wrote the machine id, so its
 `ConditionFileNotEmpty=!/sysroot/etc/machine-id` fails; an empty-slot volume
-would also exit silently through `--prompt-suppress=password`) but still acts
-on a pre-installer legacy install (the tests pass `systemd.firstboot=no` via
-the SMBIOS string in the default boots; the boots that allow the homed
-first-boot wizard run the unit as-is, where it is a no-op). The TPM keys have no PCR policy yet (bootc's cryptenroll uses
-none, and the VM's OVMF does not measure). bootc state stays on the ext4
-root. Early units that create directories in `/var` themselves race tmpfiles
-on the empty filesystem and get denied: order them after
-`systemd-tmpfiles-setup.service` (done for `rpc-statd-notify` and
-`systemd-random-seed`).
+would also exit silently through `--prompt-suppress=password`); it still
+acts on a pre-installer legacy install, which the tests keep off with
+`systemd.firstboot=no` (SMBIOS) in the default boots. The TPM keys have no
+PCR policy yet (bootc's cryptenroll uses none, and the VM's OVMF does not
+measure). bootc state stays on the ext4 root. Early units that create
+directories in `/var` themselves race tmpfiles on the empty filesystem:
+order them after `systemd-tmpfiles-setup.service` (done for
+`rpc-statd-notify` and `systemd-random-seed`; item 12).
 
 **Test harness:** `vm.sh` attaches a software TPM (swtpm,
 `images/test/tpm-setup.sh` fetches it into `build/swtpm`) and installs with
@@ -209,24 +197,22 @@ for the factory `C!` rules on `/etc/shadow` and `/etc/gshadow` (item 11).
 
 ## 20. Wrong or missing labels on the mutable state
 
-The OS content itself is labeled inside the composefs image; the mutable parts
-are `/etc`, `/var` and the backing directories under `/sysroot/state` on the
-root filesystem, which carry ordinary xattr labels. Symptom: AVCs with
-`unlabeled_t` targets, or with `trawcon="kernel"` for files written before a
-policy was loaded. Recovery: boot permissive (the UKI default), then
-`sudo restorecon -R /etc /var` (the mounted views only).
+The OS content itself is labeled inside the composefs image; the mutable
+parts are `/etc`, `/var` and the backing directories under `/sysroot/state`
+(ordinary xattr labels). Symptom: AVCs with `unlabeled_t` targets, or with
+`trawcon="kernel"` for files written before a policy was loaded. Recovery:
+boot permissive (the UKI default), then `sudo restorecon -R /etc /var` (the
+mounted views only).
 
-**Never run restorecon (or an autorelabel) on `/sysroot` or anything under
-it.** restorecon takes the label from the *path* of each file, and the
-file-context patterns describe the running system (`/usr`, `/etc`, `/var`, …);
-run on `/sysroot/state/...` or the object store the paths match nothing
-meaningful, so most files get a generic fallback label and the system breaks
-until a correct full relabel. The content-addressed object store is the worst
-case: its names are digests, so no pattern could ever be right (on ostree it
-also wrecks the hardlinked targets). The same reason is why
-`restorecon -R /etc /var` is fine: it is run on the paths as the running
-system sees them, never on their backing directories under `/sysroot/state`,
-and the initrd's `setfiles -r /sysroot ... /sysroot/etc` does the same (the
+**Never run restorecon (or an autorelabel) on `/sysroot` or under it.**
+restorecon takes the label from the *path*, and the file-context patterns
+describe the running system; run on `/sysroot/state/...` or the object store
+the paths match nothing meaningful, so most files get a generic fallback
+label and the system breaks until a correct full relabel (the object store is
+the worst case: its names are digests, so no pattern could ever be right; on
+ostree it also wrecks the hardlinked targets). `restorecon -R /etc /var` is
+fine for the same reason: it runs on the paths as the running system sees
+them — the initrd's `setfiles -r /sysroot ... /sysroot/etc` does the same (the
 prefix is stripped, so the patterns see `/etc/...`). This rules out
 `touch /.autorelabel` (a full relabel) and `restorecon -R /sysroot/state`.
 
@@ -257,69 +243,63 @@ queue), and `pkill -f` matches your own ssh command line.
 
 (The playbook is docs/installer.md; this is the mechanism.)
 
-It runs in the initrd of the stick's own UKI, selected by the addon's
-`rd.systemd.unit=`. It is `bootc install to-filesystem` without a container:
+It runs in the initrd of the stick's own UKI (the addon's
+`rd.systemd.unit=`), as `bootc install to-filesystem` without a container:
 `--source-imgref oci:<dir>` skips bootc's container check, and
 `/etc/ostree/prepare-root.conf` must exist (the script copies the image's own
 from the stick; `/usr` is read-only there). It generates the machine id and
-passes it as `systemd-repart --seed`, so the ESP, root and /var partition
-UUIDs (and the LUKS2 and filesystem UUIDs they seed) are all derived from it;
-the /var partition doubles as the scratch the image is extracted into (never
-RAM; the stick is unmounted right after and can be pulled), and the machine id
-is written into the deployment's `/etc` so the first boot is not a first boot.
-There is no separate scratch partition. Test commands go to an *interactive*
-bash over the serial console, so `!!` expands as history: never print or grep
-`!!!`.
+passes it as `systemd-repart --seed`, so every UUID (partition, LUKS2,
+filesystem) is derived from it; /var doubles as the scratch the image is
+extracted into (never RAM — the stick is unmounted right after and can be
+pulled); the machine id is written into the deployment's `/etc` so the first
+boot is not a first boot. Test commands go to an *interactive* bash over the
+serial console, so `!!` expands as history: never print or grep `!!!`.
 
-`systemd-repart` makes the root (`SYSTEMD_REPART_MKFS_OPTIONS_EXT4='-O verity'`,
-`Encrypt=` appended per the chosen mode: `tpm2`, `key-file` for the no-tpm
-variant's empty-slot root, or nothing); do not seal TPM keys to PCR 12 (the
-addon changes it). `bootc-generic-growpart.service` of the base image is
-masked (it grew a plain root in VMs only). Do not put a TPM-presence test on
-`systemd-tpm2-setup-early`'s SRK file or `systemd-analyze has-tpm2`: the test
-VM's boot is not measured, so both say no/partial while the TPM works; use
-`/dev/tpmrm0` after `After=tpm2.target`.
+`systemd-repart` makes the root (`SYSTEMD_REPART_MKFS_OPTIONS_EXT4='-O
+verity'`, `Encrypt=` appended per the chosen mode); do not seal TPM keys to
+PCR 12 (the addon changes it). For a TPM-presence test use `/dev/tpmrm0`
+after `After=tpm2.target`, never `systemd-tpm2-setup-early`'s SRK file or
+`systemd-analyze has-tpm2` (above, 16).
 
-The installed system has **no `/boot` mount and no `/etc/fstab`**: in this
-layout the ESP *is* the boot partition (bootc never persists a boot mount for
-`to-filesystem`), and bootc finds the ESP by device scan
+The installed system has **no `/boot` mount and no `/etc/fstab`**: the ESP
+*is* the boot partition (bootc never persists a boot mount for
+`to-filesystem`) and bootc finds it by device scan
 (`find_first_colocated_esp` from the root device) at install, upgrade and
-switch, so nothing needs it mounted; tools that want the boot files must mount
+switch; tools that want the boot files must mount
 `/dev/disk/by-partlabel/ESP` themselves.
 
 The image variant (`VARIANT` in `build.sh`, a label on the image, the
-`/usr/installer/variant` marker in the addon) decides the encryption modes the
-installer offers and the initrd's root-unlock drop-in (docs/encryption.md): a
-stick must be made from the variant it will install. The addon's package
-overlay comes from a fresh `dnf` resolve (`build-addon.sh`'s mkosi), but every
-file it carries that the boot initrd also has must be byte-identical (the
-overlay unpacks over that initrd, and `overlay.py` rejects a differing copy),
-so `build-addon.sh` pins the overlay's `bootc` to the version the boot initrd
-carries (read from the rpm build note embedded in `initramfs-setup`;
-`mkosi.conf` deliberately does not list it) — a fresh resolve picks the newest
-from updates, which broke the stick build once.
+`/usr/installer/variant` marker in the addon) decides the encryption modes
+offered and the initrd's root-unlock drop-in (docs/encryption.md): a stick
+must be made from the variant it will install. The addon's package overlay
+comes from a fresh `dnf` resolve (`build-addon.sh`), but every file the boot
+initrd also has must be byte-identical (`overlay.py` rejects a differing
+copy, which a fresh resolve from updates produced once): `build-addon.sh`
+pins the overlay's `bootc` to the version the boot initrd carries (read from
+the rpm build note embedded in `initramfs-setup`; `mkosi.conf` deliberately
+does not list it).
 
 ## 25. The first user
 
 Root is locked, so `inglenook-install` writes a `home.create.<name>`
 credential (a homed JSON record with `memberOf: [wheel]`, the password hash
-and the plain password in `secret`: homed refuses to create a home from a hash
-alone) into the deployment's `/etc/credstore` and labels it with
-`setfiles -r <deployment>`. `systemd-homed-firstboot.service` is enabled in the
-Containerfile; its drop-in adds `--member-of=wheel`, deletes
-`/etc/credstore/home.create.*` afterwards and replaces
-`ConditionFirstBoot=yes` by `ConditionDirectoryNotEmpty=!/var/lib/systemd/home`:
-the image ships `/etc/machine-id` as an *empty file*, which machine-id(5) rule
-4 calls "not a first boot", so `ConditionFirstBoot` is never true in the real
-system (this also keeps `systemd-firstboot.service`, which would prompt for a
-root password, from ever running; shipping `uninitialized` instead would turn
-that on, and would make the initrd's cryptenroll wizard, which tests
-`ConditionFileNotEmpty=!/sysroot/etc/machine-id`, skip).
+and the plain password in `secret` — homed refuses to create a home from a
+hash alone) into the deployment's `/etc/credstore` and labels it with
+`setfiles -r <deployment>`. `systemd-homed-firstboot.service` is enabled in
+the Containerfile; its drop-in clears `ConditionFirstBoot=` (the machine ID
+is already initialized by the time the real system boots — item 11 — so it
+is never true; this also keeps `systemd-firstboot.service`, which would
+prompt for a root password, from ever running) and runs `homectl firstboot
+--member-of=wheel --mute-console=yes` under an `ExecCondition` that skips
+quietly when a user record already exists (the `*.identity` files — not
+"the directory is empty": homed puts its signing keys, `local.private` and
+`local.public`, into `/var/lib/systemd/home` when it starts); `ExecStartPost`
+deletes `/etc/credstore/home.create.*`.
 
-`homectl firstboot` prompts on the console only when no regular user exists,
-which is now the case on an install without a first user: the wizard asks for
-one at the first boot (the account joins `wheel`). Without a credential it
-prompts on the console. `systemd.firstboot=no` (what `vm.sh` adds by default)
-also skips this wizard: tests that need it use `VM_FIRSTBOOT=1` (which also
-allows the disk-encryption first-boot wizard; on an installed system that
-one is a no-op, the installer having written the machine id).
+`homectl firstboot` prompts (through ask-password) only when no regular
+user exists: on an install without a first user the wizard asks for one at
+the first boot (the account joins `wheel`). `systemd.firstboot=no` (what
+`vm.sh` adds by default) also skips this wizard; tests that need it use
+`VM_FIRSTBOOT=1` (which also allows the disk-encryption first-boot wizard;
+on an installed system that one is a no-op, the installer having written
+the machine id).
