@@ -322,9 +322,10 @@ readers. b041a64 already fixed the prompt channel (a replacement ask-password
 agent on the script's TTY); what remains is the blackout itself.
 
 **Upstream: homed's `perMachine: null`** — a record without the field breaks
-`homectl update --fido2-device=`; the installer works around it by injecting
-`perMachine: []` into the first user's credential. A candidate for
-`docs/upstream/`.
+`homectl update --fido2-device=` ("Object field 'perMachine' has wrong type
+null", systemd issue 39599); the installer works around it by injecting
+`perMachine: []` into the first user's credential (token.sh covers the
+installer-shaped record).
 
 **Testing the interactive path** — every test answers through the environment;
 the typed prompts are only exercised for refusals (install-safety.sh). A

@@ -50,7 +50,8 @@ locks the account. `$PIN` is not honoured by `homectl create`; in scripts answer
 The homed default. Each home is a sparse image file `/home/<user>.home` (GPT, then LUKS2, then btrfs); the
 record is in `/var/lib/systemd/home/<user>.identity`. The token is then also what unlocks the data: homed
 adds one LUKS keyslot per credential (the FIDO2 hmac-secret is the passphrase), another for a recovery key.
-`token.sh` checks all of the following with the software token.
+`token.sh` covers most of the following with the software token (on an installed system, so with the
+XFS /var in play).
 
 - **Create** like a directory home with `--recovery-key=yes` (printed once, save it; or
   `--recovery-key-file=`), `--disk-size=` (the default is 85% of free space) and `--auto-resize-mode=off`
@@ -106,7 +107,7 @@ currently holds, then destroys every other slot. So:
 - **`systemd-cryptenroll` refuses**: "LUKS2 volume is managed by systemd-homed, please use homectl to
   enroll tokens." A slot added by `cryptsetup luksAddKey` instead would be unknown to homed (it only
   tries the passwords of its record) and the next sync destroys it.
-- Not tried: LUKS homes on the XFS `/var` variant, ssh login to a LUKS home, `homectl passwd` flows.
+- Not tried: ssh login to a LUKS home, `homectl passwd` flows.
 
 ## Limits to know before relying on it
 
