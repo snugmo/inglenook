@@ -121,9 +121,10 @@ docs/            # On-demand reference docs — read when relevant (see below)
 
 - Target **POSIX sh** in new scripts: `/bin/sh` shebang, no bashisms — bash
   only where a feature actually needs it (`[[ ]]`, arrays, process
-  substitution). The existing test and build scripts are bash on purpose
-  (`token/answerer.sh` and `token/nopw.sh` are the `/bin/sh` examples); don't
-  rewrite them, and `inglenook-install` must stay bash (`set -E`, arrays).
+  substitution). The `/bin/sh` examples are `token/answerer.sh`,
+  `token/nopw.sh`, the test `installer.sh` and `addons/serial-console.sh`;
+  the rest of the test and build scripts are bash on purpose, and
+  `inglenook-install` must stay bash (`set -E`, arrays).
 - `set -euo pipefail` in bash scripts (the installer adds `-E` with an ERR
   trap); a failing `cd` gets `|| exit`.
 - Quote words that carry glob or comma characters (QEMU argument values, the
